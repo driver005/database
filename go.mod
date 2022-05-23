@@ -8,7 +8,4 @@ require (
 	github.com/jinzhu/now v1.1.5
 )
 
-retract (
-	v1.0.1
-	v1.0.0
-)
+retract v1.0.0
