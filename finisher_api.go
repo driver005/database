@@ -83,7 +83,7 @@ func (db *DB) Save(value interface{}) (tx *DB) {
 		if _, ok := tx.Statement.Types["ON CONFLICT"]; !ok {
 			tx = tx.Types(types.OnConflict{UpdateAll: true})
 		}
-		tx = tx.callbacks.Create().Execute(tx.Set("gorm:update_track_time", true))
+		tx = tx.callbacks.Create().Execute(tx.Set("database:update_track_time", true))
 	case reflect.Struct:
 		if err := tx.Statement.Parse(value); err == nil && tx.Statement.Schema != nil {
 			for _, pf := range tx.Statement.Schema.PrimaryFields {
@@ -358,14 +358,14 @@ func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) (tx *DB) {
 	return tx
 }
 
-// Update update attributes with callbacks, refer: https://gorm.io/docs/update.html#Update-Changed-Fields
+// Update update attributes with callbacks, refer: https://database.io/docs/update.html#Update-Changed-Fields
 func (db *DB) Update(column string, value interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Dest = map[string]interface{}{column: value}
 	return tx.callbacks.Update().Execute(tx)
 }
 
-// Updates update attributes with callbacks, refer: https://gorm.io/docs/update.html#Update-Changed-Fields
+// Updates update attributes with callbacks, refer: https://database.io/docs/update.html#Update-Changed-Fields
 func (db *DB) Updates(values interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Dest = values

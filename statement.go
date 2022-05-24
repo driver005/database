@@ -177,7 +177,7 @@ func (stmt *Statement) AddVar(writer types.Writer, vars ...interface{}) {
 			if reflectValue.Kind() == reflect.Ptr && reflectValue.IsNil() {
 				stmt.AddVar(writer, nil)
 			} else {
-				stmt.AddVar(writer, v.GormValue(stmt.Context, stmt.DB))
+				stmt.AddVar(writer, v.DBValue(stmt.Context, stmt.DB))
 			}
 		case types.Expression:
 			v.Build(stmt)

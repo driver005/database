@@ -30,9 +30,9 @@ type Config struct {
 	database.Dialector
 }
 
-// GormDataTypeInterface database data type interface
-type GormDataTypeInterface interface {
-	GormDBDataType(*database.DB, *schema.Field) string
+// DBDataTypeInterface database data type interface
+type DBDataTypeInterface interface {
+	DBDataType(*database.DB, *schema.Field) string
 }
 
 // RunWithValue run migration with statement value
@@ -55,8 +55,8 @@ func (m Migrator) RunWithValue(value interface{}, fc func(*database.Statement) e
 // DataTypeOf return field's db data type
 func (m Migrator) DataTypeOf(field *schema.Field) string {
 	fieldValue := reflect.New(field.IndirectFieldType)
-	if dataTyper, ok := fieldValue.Interface().(GormDataTypeInterface); ok {
-		if dataType := dataTyper.GormDBDataType(m.DB, field); dataType != "" {
+	if dataTyper, ok := fieldValue.Interface().(DBDataTypeInterface); ok {
+		if dataType := dataTyper.DBDataType(m.DB, field); dataType != "" {
 			return dataType
 		}
 	}

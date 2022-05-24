@@ -229,7 +229,7 @@ func ParseWithSpecialTableName(dest interface{}, cacheStore *sync.Map, namer Nam
 	}
 
 	if field := schema.PrioritizedPrimaryField; field != nil {
-		switch field.GORMDataType {
+		switch field.DBDataType {
 		case Int, Uint:
 			if _, ok := field.TagSettings["AUTOINCREMENT"]; !ok {
 				if !field.HasDefaultValue || field.DefaultValueInterface != nil {
@@ -246,10 +246,10 @@ func ParseWithSpecialTableName(dest interface{}, cacheStore *sync.Map, namer Nam
 	for _, name := range callbacks {
 		if methodValue := modelValue.MethodByName(name); methodValue.IsValid() {
 			switch methodValue.Type().String() {
-			case "func(*gorm.DB) error": // TODO hack
+			case "func(*database.DB) error": // TODO hack
 				reflect.Indirect(reflect.ValueOf(schema)).FieldByName(name).SetBool(true)
 			default:
-				logger.Default.Warn(context.Background(), "Model %v don't match %vInterface, should be `%v(*gorm.DB) error`. Please see https://gorm.io/docs/hooks.html", schema, name, name)
+				logger.Default.Warn(context.Background(), "Model %v don't match %vInterface, should be `%v(*database.DB) error`. Please see https://database.io/docs/hooks.html", schema, name, name)
 			}
 		}
 	}

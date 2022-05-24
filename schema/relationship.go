@@ -124,10 +124,10 @@ func (schema *Schema) parseRelation(field *Field) *Relationship {
 
 // User has many Toys, its `Polymorphic` is `Owner`, Pet has one Toy, its `Polymorphic` is `Owner`
 //     type User struct {
-//       Toys []Toy `gorm:"polymorphic:Owner;"`
+//       Toys []Toy `database:"polymorphic:Owner;"`
 //     }
 //     type Pet struct {
-//       Toy Toy `gorm:"polymorphic:Owner;"`
+//       Toy Toy `database:"polymorphic:Owner;"`
 //     }
 //     type Toy struct {
 //       OwnerID   int
@@ -169,7 +169,7 @@ func (schema *Schema) buildPolymorphicRelation(relation *Relationship, field *Fi
 		if copyableDataType(primaryKeyField.DataType) {
 			relation.Polymorphic.PolymorphicID.DataType = primaryKeyField.DataType
 		}
-		relation.Polymorphic.PolymorphicID.GORMDataType = primaryKeyField.GORMDataType
+		relation.Polymorphic.PolymorphicID.DBDataType = primaryKeyField.DBDataType
 		if relation.Polymorphic.PolymorphicID.Size == 0 {
 			relation.Polymorphic.PolymorphicID.Size = primaryKeyField.Size
 		}
@@ -267,7 +267,7 @@ func (schema *Schema) buildMany2ManyRelation(relation *Relationship, field *Fiel
 	joinTableFields = append(joinTableFields, reflect.StructField{
 		Name: strings.Title(schema.Name) + field.Name,
 		Type: schema.ModelType,
-		Tag:  `gorm:"-"`,
+		Tag:  `database:"-"`,
 	})
 
 	if relation.JoinTable, err = Parse(reflect.New(reflect.StructOf(joinTableFields)).Interface(), schema.cacheStore, schema.namer); err != nil {
@@ -312,7 +312,7 @@ func (schema *Schema) buildMany2ManyRelation(relation *Relationship, field *Fiel
 			if copyableDataType(fieldsMap[f.Name].DataType) {
 				f.DataType = fieldsMap[f.Name].DataType
 			}
-			f.GORMDataType = fieldsMap[f.Name].GORMDataType
+			f.DBDataType = fieldsMap[f.Name].DBDataType
 			if f.Size == 0 {
 				f.Size = fieldsMap[f.Name].Size
 			}
@@ -488,7 +488,7 @@ func (schema *Schema) guessRelation(relation *Relationship, field *Field, cgl gu
 		if copyableDataType(primaryFields[idx].DataType) {
 			foreignField.DataType = primaryFields[idx].DataType
 		}
-		foreignField.GORMDataType = primaryFields[idx].GORMDataType
+		foreignField.DBDataType = primaryFields[idx].DBDataType
 		if foreignField.Size == 0 {
 			foreignField.Size = primaryFields[idx].Size
 		}

@@ -24,13 +24,13 @@ var (
 )
 
 type (
-	// DataType GORM data type
+	// DataType DATABASE data type
 	DataType string
-	// TimeType GORM time type
+	// TimeType DATABASE time type
 	TimeType int64
 )
 
-// GORM time types
+// DATABASE time types
 const (
 	UnixTime        TimeType = 1
 	UnixSecond      TimeType = 2
@@ -38,7 +38,7 @@ const (
 	UnixNanosecond  TimeType = 4
 )
 
-// GORM fields types
+// DATABASE fields types
 const (
 	Bool   DataType = "bool"
 	Int    DataType = "int"
@@ -55,7 +55,7 @@ type Field struct {
 	DBName                 string
 	BindNames              []string
 	DataType               DataType
-	GORMDataType           DataType
+	DBDataType             DataType
 	PrimaryKey             bool
 	AutoIncrement          bool
 	AutoIncrementIncrement int64
@@ -93,7 +93,7 @@ type Field struct {
 func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 	var (
 		err        error
-		tagSetting = ParseTagSetting(fieldStruct.Tag.Get("gorm"), ";")
+		tagSetting = ParseTagSetting(fieldStruct.Tag.Get("database"), ";")
 	)
 
 	field := &Field{
@@ -126,7 +126,7 @@ func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 	// if field is valuer, used its value or first field as data type
 	valuer, isValuer := fieldValue.Interface().(driver.Valuer)
 	if isValuer {
-		if _, ok := fieldValue.Interface().(GormDataTypeInterface); !ok {
+		if _, ok := fieldValue.Interface().(DBDataTypeInterface); !ok {
 			if v, err := valuer.Value(); reflect.ValueOf(v).IsValid() && err == nil {
 				fieldValue = reflect.ValueOf(v)
 			}
@@ -141,7 +141,7 @@ func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 
 				if rv.Kind() == reflect.Struct && !rvType.ConvertibleTo(TimeReflectType) {
 					for i := 0; i < rvType.NumField(); i++ {
-						for key, value := range ParseTagSetting(rvType.Field(i).Tag.Get("gorm"), ";") {
+						for key, value := range ParseTagSetting(rvType.Field(i).Tag.Get("database"), ";") {
 							if _, ok := field.TagSettings[key]; !ok {
 								field.TagSettings[key] = value
 							}
@@ -271,8 +271,8 @@ func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 		}
 	}
 
-	if dataTyper, ok := fieldValue.Interface().(GormDataTypeInterface); ok {
-		field.DataType = DataType(dataTyper.GormDataType())
+	if dataTyper, ok := fieldValue.Interface().(DBDataTypeInterface); ok {
+		field.DataType = DataType(dataTyper.DBDataType())
 	}
 
 	if v, ok := field.TagSettings["AUTOCREATETIME"]; (ok && utils.CheckTruth(v)) || (!ok && field.Name == "CreatedAt" && (field.DataType == Time || field.DataType == Int || field.DataType == Uint)) {
@@ -299,8 +299,8 @@ func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 		}
 	}
 
-	if field.GORMDataType == "" {
-		field.GORMDataType = field.DataType
+	if field.DBDataType == "" {
+		field.DBDataType = field.DataType
 	}
 
 	if val, ok := field.TagSettings["TYPE"]; ok {
@@ -371,7 +371,7 @@ func (schema *Schema) ParseField(fieldStruct reflect.StructField) *Field {
 	}
 
 	// Normal anonymous field or having `EMBEDDED` tag
-	if _, ok := field.TagSettings["EMBEDDED"]; ok || (field.GORMDataType != Time && field.GORMDataType != Bytes && !isValuer &&
+	if _, ok := field.TagSettings["EMBEDDED"]; ok || (field.DBDataType != Time && field.DBDataType != Bytes && !isValuer &&
 		fieldStruct.Anonymous && (field.Creatable || field.Updatable || field.Readable)) {
 		kind := reflect.Indirect(fieldValue).Kind()
 		switch kind {

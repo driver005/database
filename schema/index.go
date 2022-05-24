@@ -89,7 +89,7 @@ func (schema *Schema) LookIndex(name string) *Index {
 }
 
 func parseFieldIndexes(field *Field) (indexes []Index, err error) {
-	for _, value := range strings.Split(field.Tag.Get("gorm"), ";") {
+	for _, value := range strings.Split(field.Tag.Get("database"), ";") {
 		if value != "" {
 			v := strings.Split(value, ":")
 			k := strings.TrimSpace(strings.ToUpper(v[0]))

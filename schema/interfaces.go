@@ -4,9 +4,9 @@ import (
 	"github.com/driver005/database/types"
 )
 
-// GormDataTypeInterface gorm data type interface
-type GormDataTypeInterface interface {
-	GormDataType() string
+// DBDataTypeInterface database data type interface
+type DBDataTypeInterface interface {
+	DBDataType() string
 }
 
 // FieldNewValuePool field new scan value pool

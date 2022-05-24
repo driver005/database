@@ -16,9 +16,9 @@ import (
 // for Config.cacheStore store PreparedStmtDB key
 const preparedStmtDBKey = "preparedStmt"
 
-// Config GORM config
+// Config database config
 type Config struct {
-	// GORM perform single create, update, delete operations in transactions by default to ensure database data integrity
+	// database perform single create, update, delete operations in transactions by default to ensure database data integrity
 	// You can disable it by setting `SkipDefaultTransaction` to true
 	SkipDefaultTransaction bool
 	// NamingStrategy tables, columns naming strategy
@@ -79,13 +79,13 @@ func (c *Config) AfterInitialize(db *DB) error {
 	return nil
 }
 
-// Option gorm option interface
+// Option database option interface
 type Option interface {
 	Apply(*Config) error
 	AfterInitialize(*DB) error
 }
 
-// DB GORM DB definition
+// DB DATABASE DB definition
 type DB struct {
 	*Config
 	Error        error
@@ -422,7 +422,7 @@ func (db *DB) SetupJoinTable(model interface{}, field string, joinTable interfac
 		}
 
 		f.DataType = ref.ForeignKey.DataType
-		f.GORMDataType = ref.ForeignKey.GORMDataType
+		f.DBDataType = ref.ForeignKey.DBDataType
 		if f.Size == 0 {
 			f.Size = ref.ForeignKey.Size
 		}
@@ -455,7 +455,7 @@ func (db *DB) Use(plugin Plugin) error {
 
 // ToSQL for generate SQL string.
 //
-// db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+// db.ToSQL(func(tx *database.DB) *database.DB {
 // 		return tx.Model(&User{}).Where(&User{Name: "foo", Age: 20})
 // 			.Limit(10).Offset(5)
 //			.Order("name ASC")

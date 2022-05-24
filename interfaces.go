@@ -8,7 +8,7 @@ import (
 	"github.com/driver005/database/types"
 )
 
-// Dialector GORM database dialector
+// Dialector DATABASE database dialector
 type Dialector interface {
 	Name() string
 	Initialize(*DB) error
@@ -20,7 +20,7 @@ type Dialector interface {
 	Explain(sql string, vars ...interface{}) string
 }
 
-// Plugin GORM plugin interface
+// Plugin DATABASE plugin interface
 type Plugin interface {
 	Name() string
 	Initialize(*DB) error
@@ -63,9 +63,9 @@ type Tx interface {
 	StmtContext(ctx context.Context, stmt *sql.Stmt) *sql.Stmt
 }
 
-// Valuer gorm valuer interface
+// Valuer database valuer interface
 type Valuer interface {
-	GormValue(context.Context, *DB) types.Expr
+	DBValue(context.Context, *DB) types.Expr
 }
 
 // GetDBConnector SQL db connector

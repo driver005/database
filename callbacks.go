@@ -25,7 +25,7 @@ func initializeCallbacks(db *DB) *callbacks {
 	}
 }
 
-// callbacks gorm callbacks manager
+// callbacks database callbacks manager
 type callbacks struct {
 	processors map[string]*processor
 }

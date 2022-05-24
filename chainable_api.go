@@ -256,12 +256,12 @@ func (db *DB) Offset(offset int) (tx *DB) {
 }
 
 // Scopes pass current database connection to arguments `func(DB) DB`, which could be used to add conditions dynamically
-//     func AmountGreaterThan1000(db *gorm.DB) *gorm.DB {
+//     func AmountGreaterThan1000(db *database.DB) *database.DB {
 //         return db.Where("amount > ?", 1000)
 //     }
 //
-//     func OrderStatus(status []string) func (db *gorm.DB) *gorm.DB {
-//         return func (db *gorm.DB) *gorm.DB {
+//     func OrderStatus(status []string) func (db *database.DB) *database.DB {
+//         return func (db *database.DB) *database.DB {
 //             return db.Scopes(AmountGreaterThan1000).Where("status in (?)", status)
 //         }
 //     }
