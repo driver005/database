@@ -1,4 +1,4 @@
-# Databse
+# Database
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/driver005/database.svg)](https://pkg.go.dev/github.com/driver005/database)
 
