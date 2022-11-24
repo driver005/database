@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/migrator"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 type Migrator struct {
@@ -16,7 +16,7 @@ type Migrator struct {
 	Dialector
 }
 
-func (m Migrator) FullDataTypeOf(field *schema.Field) types.Expr {
+func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 	expr := m.Migrator.FullDataTypeOf(field)
 
 	if value, ok := field.TagSettings["COMMENT"]; ok {
@@ -31,7 +31,7 @@ func (m Migrator) AlterColumn(value interface{}, field string) error {
 		if field := stmt.Schema.LookUpField(field); field != nil {
 			return m.DB.Exec(
 				"ALTER TABLE ? MODIFY COLUMN ? ?",
-				types.Table{Name: stmt.Table}, types.Column{Name: field.DBName}, m.FullDataTypeOf(field),
+				clause.Table{Name: stmt.Table}, clause.Column{Name: field.DBName}, m.FullDataTypeOf(field),
 			).Error
 		}
 		return fmt.Errorf("failed to look up field with name: %s", field)
@@ -58,8 +58,8 @@ func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error
 		if field != nil {
 			return m.DB.Exec(
 				"ALTER TABLE ? CHANGE ? ? ?",
-				types.Table{Name: stmt.Table}, types.Column{Name: oldName},
-				types.Column{Name: newName}, m.FullDataTypeOf(field),
+				clause.Table{Name: stmt.Table}, clause.Column{Name: oldName},
+				clause.Column{Name: newName}, m.FullDataTypeOf(field),
 			).Error
 		}
 
@@ -72,7 +72,7 @@ func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error 
 		return m.RunWithValue(value, func(stmt *database.Statement) error {
 			return m.DB.Exec(
 				"ALTER TABLE ? RENAME INDEX ? TO ?",
-				types.Table{Name: stmt.Table}, types.Column{Name: oldName}, types.Column{Name: newName},
+				clause.Table{Name: stmt.Table}, clause.Column{Name: oldName}, clause.Column{Name: newName},
 			).Error
 		})
 	}
@@ -86,7 +86,7 @@ func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error 
 		if idx := stmt.Schema.LookIndex(newName); idx == nil {
 			if idx = stmt.Schema.LookIndex(oldName); idx != nil {
 				opts := m.BuildIndexOptions(idx.Fields, stmt)
-				values := []interface{}{types.Column{Name: newName}, types.Table{Name: stmt.Table}, opts}
+				values := []interface{}{clause.Column{Name: newName}, clause.Table{Name: stmt.Table}, opts}
 
 				createIndexSQL := "CREATE "
 				if idx.Class != "" {
@@ -113,7 +113,7 @@ func (m Migrator) DropTable(values ...interface{}) error {
 		tx.Exec("SET FOREIGN_KEY_CHECKS = 0;")
 		for i := len(values) - 1; i >= 0; i-- {
 			if err := m.RunWithValue(values[i], func(stmt *database.Statement) error {
-				return tx.Exec("DROP TABLE IF EXISTS ? CASCADE", types.Table{Name: stmt.Table}).Error
+				return tx.Exec("DROP TABLE IF EXISTS ? CASCADE", clause.Table{Name: stmt.Table}).Error
 			}); err != nil {
 				return err
 			}
@@ -126,25 +126,25 @@ func (m Migrator) DropConstraint(value interface{}, name string) error {
 	return m.RunWithValue(value, func(stmt *database.Statement) error {
 		constraint, chk, table := m.GuessConstraintAndTable(stmt, name)
 		if chk != nil {
-			return m.DB.Exec("ALTER TABLE ? DROP CHECK ?", types.Table{Name: stmt.Table}, types.Column{Name: chk.Name}).Error
+			return m.DB.Exec("ALTER TABLE ? DROP CHECK ?", clause.Table{Name: stmt.Table}, clause.Column{Name: chk.Name}).Error
 		}
 		if constraint != nil {
 			name = constraint.Name
 		}
 
 		return m.DB.Exec(
-			"ALTER TABLE ? DROP FOREIGN KEY ?", types.Table{Name: table}, types.Column{Name: name},
+			"ALTER TABLE ? DROP FOREIGN KEY ?", clause.Table{Name: table}, clause.Column{Name: name},
 		).Error
 	})
 }
 
-// ColumnTypes column types return columnTypes,error
-func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) {
-	columnTypes := make([]database.ColumnType, 0)
+// Columnclause column clause return columnclause,error
+func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error) {
+	columnclause := make([]database.ColumnType, 0)
 	err := m.RunWithValue(value, func(stmt *database.Statement) error {
 		var (
 			currentDatabase = m.DB.Migrator().CurrentDatabase()
-			columnTypeSQL   = "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale "
+			columnclauseQL  = "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale "
 			rows, err       = m.DB.Session(&database.Session{}).Table(stmt.Table).Limit(1).Rows()
 		)
 
@@ -152,18 +152,18 @@ func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) 
 			return err
 		}
 
-		rawColumnTypes, err := rows.ColumnTypes()
+		rawColumnclause, err := rows.Columnclause()
 
 		if err := rows.Close(); err != nil {
 			return err
 		}
 
 		if !m.DisableDatetimePrecision {
-			columnTypeSQL += ", datetime_precision "
+			columnclauseQL += ", datetime_precision "
 		}
-		columnTypeSQL += "FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ORDINAL_POSITION"
+		columnclauseQL += "FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ORDINAL_POSITION"
 
-		columns, rowErr := m.DB.Raw(columnTypeSQL, currentDatabase, stmt.Table).Rows()
+		columns, rowErr := m.DB.Raw(columnclauseQL, currentDatabase, stmt.Table).Rows()
 		if rowErr != nil {
 			return rowErr
 		}
@@ -208,20 +208,20 @@ func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) 
 				column.DecimalSizeValue = datetimePrecision
 			}
 
-			for _, c := range rawColumnTypes {
+			for _, c := range rawColumnclause {
 				if c.Name() == column.NameValue.String {
 					column.SQLColumnType = c
 					break
 				}
 			}
 
-			columnTypes = append(columnTypes, column)
+			columnclause = append(columnclause, column)
 		}
 
 		return nil
 	})
 
-	return columnTypes, err
+	return columnclause, err
 }
 
 func (m Migrator) CurrentDatabase() (name string) {

@@ -5,8 +5,8 @@ import (
 	"sort"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -69,11 +69,13 @@ func Update(config *Config) func(db *database.DB) {
 
 		if db.Statement.SQL.Len() == 0 {
 			db.Statement.SQL.Grow(180)
-			db.Statement.AddClauseIfNotExists(types.Update{})
-			if set := ConvertToAssignments(db.Statement); len(set) != 0 {
-				db.Statement.AddClause(set)
-			} else if _, ok := db.Statement.Types["SET"]; !ok {
-				return
+			db.Statement.AddClauseIfNotExists(clause.Update{})
+			if _, ok := db.Statement.Clauses["SET"]; !ok {
+				if set := ConvertToAssignments(db.Statement); len(set) != 0 {
+					db.Statement.AddClause(set)
+				} else {
+					return
+				}
 			}
 
 			db.Statement.Build(db.Statement.BuildClauses...)
@@ -125,7 +127,7 @@ func AfterUpdate(db *database.DB) {
 }
 
 // ConvertToAssignments convert to update assignments
-func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
+func ConvertToAssignments(stmt *database.Statement) (set clause.Set) {
 	var (
 		selectColumns, restricted = stmt.SelectAndOmitColumns(false, true)
 		assignValue               func(field *schema.Field, value interface{})
@@ -158,26 +160,26 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 		switch stmt.ReflectValue.Kind() {
 		case reflect.Slice, reflect.Array:
 			if size := stmt.ReflectValue.Len(); size > 0 {
-				var primaryKeyExprs []types.Expression
+				var isZero bool
 				for i := 0; i < size; i++ {
-					exprs := make([]types.Expression, len(stmt.Schema.PrimaryFields))
-					var notZero bool
-					for idx, field := range stmt.Schema.PrimaryFields {
-						value, isZero := field.ValueOf(stmt.Context, stmt.ReflectValue.Index(i))
-						exprs[idx] = types.Eq{Column: field.DBName, Value: value}
-						notZero = notZero || !isZero
-					}
-					if notZero {
-						primaryKeyExprs = append(primaryKeyExprs, types.And(exprs...))
+					for _, field := range stmt.Schema.PrimaryFields {
+						_, isZero = field.ValueOf(stmt.Context, stmt.ReflectValue.Index(i))
+						if !isZero {
+							break
+						}
 					}
 				}
 
-				stmt.AddClause(types.Where{Exprs: []types.Expression{types.Or(primaryKeyExprs...)}})
+				if !isZero {
+					_, primaryValues := schema.GetIdentityFieldValuesMap(stmt.Context, stmt.ReflectValue, stmt.Schema.PrimaryFields)
+					column, values := schema.ToQueryValues("", stmt.Schema.PrimaryFieldDBNames, primaryValues)
+					stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.IN{Column: column, Values: values}}})
+				}
 			}
 		case reflect.Struct:
 			for _, field := range stmt.Schema.PrimaryFields {
 				if value, isZero := field.ValueOf(stmt.Context, stmt.ReflectValue); !isZero {
-					stmt.AddClause(types.Where{Exprs: []types.Expression{types.Eq{Column: field.DBName, Value: value}}})
+					stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.Eq{Column: field.DBName, Value: value}}})
 				}
 			}
 		}
@@ -185,7 +187,7 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 
 	switch value := updatingValue.Interface().(type) {
 	case map[string]interface{}:
-		set = make([]types.Assignment, 0, len(value))
+		set = make([]clause.Assignment, 0, len(value))
 
 		keys := make([]string, 0, len(value))
 		for k := range value {
@@ -203,7 +205,7 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 				if field := stmt.Schema.LookUpField(k); field != nil {
 					if field.DBName != "" {
 						if v, ok := selectColumns[field.DBName]; (ok && v) || (!ok && !restricted) {
-							set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: kv})
+							set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: kv})
 							assignValue(field, value[k])
 						}
 					} else if v, ok := selectColumns[field.Name]; (ok && v) || (!ok && !restricted) {
@@ -214,7 +216,7 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 			}
 
 			if v, ok := selectColumns[k]; (ok && v) || (!ok && !restricted) {
-				set = append(set, types.Assignment{Column: types.Column{Name: k}, Value: kv})
+				set = append(set, clause.Assignment{Column: clause.Column{Name: k}, Value: kv})
 			}
 		}
 
@@ -227,13 +229,13 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 						assignValue(field, now)
 
 						if field.AutoUpdateTime == schema.UnixNanosecond {
-							set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: now.UnixNano()})
+							set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: now.UnixNano()})
 						} else if field.AutoUpdateTime == schema.UnixMillisecond {
-							set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: now.UnixNano() / 1e6})
+							set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: now.UnixNano() / 1e6})
 						} else if field.AutoUpdateTime == schema.UnixSecond {
-							set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: now.Unix()})
+							set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: now.Unix()})
 						} else {
-							set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: now})
+							set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: now})
 						}
 					}
 				}
@@ -251,7 +253,7 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 
 		switch updatingValue.Kind() {
 		case reflect.Struct:
-			set = make([]types.Assignment, 0, len(stmt.Schema.FieldsByDBName))
+			set = make([]clause.Assignment, 0, len(stmt.Schema.FieldsByDBName))
 			for _, dbName := range stmt.Schema.DBNames {
 				if field := updatingSchema.LookUpField(dbName); field != nil {
 					if !field.PrimaryKey || !updatingValue.CanAddr() || stmt.Dest != stmt.Model {
@@ -271,13 +273,13 @@ func ConvertToAssignments(stmt *database.Statement) (set types.Set) {
 							}
 
 							if (ok || !isZero) && field.Updatable {
-								set = append(set, types.Assignment{Column: types.Column{Name: field.DBName}, Value: value})
+								set = append(set, clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: value})
 								assignValue(field, value)
 							}
 						}
 					} else {
 						if value, isZero := field.ValueOf(stmt.Context, updatingValue); !isZero {
-							stmt.AddClause(types.Where{Exprs: []types.Expression{types.Eq{Column: field.DBName, Value: value}}})
+							stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.Eq{Column: field.DBName, Value: value}}})
 						}
 					}
 				}

@@ -3,8 +3,8 @@ package database
 import (
 	"reflect"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 // Migrator returns migrator
@@ -58,7 +58,7 @@ type Migrator interface {
 
 	// Database
 	CurrentDatabase() string
-	FullDataTypeOf(*schema.Field) types.Expr
+	FullDataTypeOf(*schema.Field) clause.Expr
 
 	// Tables
 	CreateTable(dst ...interface{}) error
@@ -74,7 +74,7 @@ type Migrator interface {
 	MigrateColumn(dst interface{}, field *schema.Field, columnType ColumnType) error
 	HasColumn(dst interface{}, field string) bool
 	RenameColumn(dst interface{}, oldName, field string) error
-	ColumnTypes(dst interface{}) ([]ColumnType, error)
+	Columnclause(dst interface{}) ([]ColumnType, error)
 
 	// Views
 	CreateView(name string, option ViewOption) error

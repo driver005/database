@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/driver005/database"
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 )
 
 func Query(db *database.DB) {
@@ -37,38 +37,38 @@ func BuildQuerySQL(db *database.DB) {
 
 	if db.Statement.SQL.Len() == 0 {
 		db.Statement.SQL.Grow(100)
-		clauseSelect := types.Select{Distinct: db.Statement.Distinct}
+		clauseSelect := clause.Select{Distinct: db.Statement.Distinct}
 
 		if db.Statement.ReflectValue.Kind() == reflect.Struct && db.Statement.ReflectValue.Type() == db.Statement.Schema.ModelType {
-			var conds []types.Expression
+			var conds []clause.Expression
 			for _, primaryField := range db.Statement.Schema.PrimaryFields {
 				if v, isZero := primaryField.ValueOf(db.Statement.Context, db.Statement.ReflectValue); !isZero {
-					conds = append(conds, types.Eq{Column: types.Column{Table: db.Statement.Table, Name: primaryField.DBName}, Value: v})
+					conds = append(conds, clause.Eq{Column: clause.Column{Table: db.Statement.Table, Name: primaryField.DBName}, Value: v})
 				}
 			}
 
 			if len(conds) > 0 {
-				db.Statement.AddClause(types.Where{Exprs: conds})
+				db.Statement.AddClause(clause.Where{Exprs: conds})
 			}
 		}
 
 		if len(db.Statement.Selects) > 0 {
-			clauseSelect.Columns = make([]types.Column, len(db.Statement.Selects))
+			clauseSelect.Columns = make([]clause.Column, len(db.Statement.Selects))
 			for idx, name := range db.Statement.Selects {
 				if db.Statement.Schema == nil {
-					clauseSelect.Columns[idx] = types.Column{Name: name, Raw: true}
+					clauseSelect.Columns[idx] = clause.Column{Name: name, Raw: true}
 				} else if f := db.Statement.Schema.LookUpField(name); f != nil {
-					clauseSelect.Columns[idx] = types.Column{Name: f.DBName}
+					clauseSelect.Columns[idx] = clause.Column{Name: f.DBName}
 				} else {
-					clauseSelect.Columns[idx] = types.Column{Name: name, Raw: true}
+					clauseSelect.Columns[idx] = clause.Column{Name: name, Raw: true}
 				}
 			}
 		} else if db.Statement.Schema != nil && len(db.Statement.Omits) > 0 {
 			selectColumns, _ := db.Statement.SelectAndOmitColumns(false, false)
-			clauseSelect.Columns = make([]types.Column, 0, len(db.Statement.Schema.DBNames))
+			clauseSelect.Columns = make([]clause.Column, 0, len(db.Statement.Schema.DBNames))
 			for _, dbName := range db.Statement.Schema.DBNames {
 				if v, ok := selectColumns[dbName]; (ok && v) || !ok {
-					clauseSelect.Columns = append(clauseSelect.Columns, types.Column{Table: db.Statement.Table, Name: dbName})
+					clauseSelect.Columns = append(clauseSelect.Columns, clause.Column{Table: db.Statement.Table, Name: dbName})
 				}
 			}
 		} else if db.Statement.Schema != nil && db.Statement.ReflectValue.IsValid() {
@@ -86,61 +86,69 @@ func BuildQuerySQL(db *database.DB) {
 				stmt := database.Statement{DB: db}
 				// smaller struct
 				if err := stmt.Parse(db.Statement.Dest); err == nil && (db.QueryFields || stmt.Schema.ModelType != db.Statement.Schema.ModelType) {
-					clauseSelect.Columns = make([]types.Column, len(stmt.Schema.DBNames))
+					clauseSelect.Columns = make([]clause.Column, len(stmt.Schema.DBNames))
 
 					for idx, dbName := range stmt.Schema.DBNames {
-						clauseSelect.Columns[idx] = types.Column{Table: db.Statement.Table, Name: dbName}
+						clauseSelect.Columns[idx] = clause.Column{Table: db.Statement.Table, Name: dbName}
 					}
 				}
 			}
 		}
 
 		// inline joins
-		fromClause := types.From{}
-		if v, ok := db.Statement.Types["FROM"].Expression.(types.From); ok {
+		fromClause := clause.From{}
+		if v, ok := db.Statement.Clauses["FROM"].Expression.(clause.From); ok {
 			fromClause = v
 		}
 
 		if len(db.Statement.Joins) != 0 || len(fromClause.Joins) != 0 {
 			if len(db.Statement.Selects) == 0 && len(db.Statement.Omits) == 0 && db.Statement.Schema != nil {
-				clauseSelect.Columns = make([]types.Column, len(db.Statement.Schema.DBNames))
+				clauseSelect.Columns = make([]clause.Column, len(db.Statement.Schema.DBNames))
 				for idx, dbName := range db.Statement.Schema.DBNames {
-					clauseSelect.Columns[idx] = types.Column{Table: db.Statement.Table, Name: dbName}
+					clauseSelect.Columns[idx] = clause.Column{Table: db.Statement.Table, Name: dbName}
 				}
 			}
 
 			for _, join := range db.Statement.Joins {
 				if db.Statement.Schema == nil {
-					fromClause.Joins = append(fromClause.Joins, types.Join{
-						Expression: types.NamedExpr{SQL: join.Name, Vars: join.Conds},
+					fromClause.Joins = append(fromClause.Joins, clause.Join{
+						Expression: clause.NamedExpr{SQL: join.Name, Vars: join.Conds},
 					})
 				} else if relation, ok := db.Statement.Schema.Relationships.Relations[join.Name]; ok {
 					tableAliasName := relation.Name
 
-					for _, s := range relation.FieldSchema.DBNames {
-						clauseSelect.Columns = append(clauseSelect.Columns, types.Column{
-							Table: tableAliasName,
-							Name:  s,
-							Alias: tableAliasName + "__" + s,
-						})
+					columnStmt := database.Statement{
+						Table: tableAliasName, DB: db, Schema: relation.FieldSchema,
+						Selects: join.Selects, Omits: join.Omits,
 					}
 
-					exprs := make([]types.Expression, len(relation.References))
+					selectColumns, restricted := columnStmt.SelectAndOmitColumns(false, false)
+					for _, s := range relation.FieldSchema.DBNames {
+						if v, ok := selectColumns[s]; (ok && v) || (!ok && !restricted) {
+							clauseSelect.Columns = append(clauseSelect.Columns, clause.Column{
+								Table: tableAliasName,
+								Name:  s,
+								Alias: tableAliasName + "__" + s,
+							})
+						}
+					}
+
+					exprs := make([]clause.Expression, len(relation.References))
 					for idx, ref := range relation.References {
 						if ref.OwnPrimaryKey {
-							exprs[idx] = types.Eq{
-								Column: types.Column{Table: types.CurrentTable, Name: ref.PrimaryKey.DBName},
-								Value:  types.Column{Table: tableAliasName, Name: ref.ForeignKey.DBName},
+							exprs[idx] = clause.Eq{
+								Column: clause.Column{Table: clause.CurrentTable, Name: ref.PrimaryKey.DBName},
+								Value:  clause.Column{Table: tableAliasName, Name: ref.ForeignKey.DBName},
 							}
 						} else {
 							if ref.PrimaryValue == "" {
-								exprs[idx] = types.Eq{
-									Column: types.Column{Table: types.CurrentTable, Name: ref.ForeignKey.DBName},
-									Value:  types.Column{Table: tableAliasName, Name: ref.PrimaryKey.DBName},
+								exprs[idx] = clause.Eq{
+									Column: clause.Column{Table: clause.CurrentTable, Name: ref.ForeignKey.DBName},
+									Value:  clause.Column{Table: tableAliasName, Name: ref.PrimaryKey.DBName},
 								}
 							} else {
-								exprs[idx] = types.Eq{
-									Column: types.Column{Table: tableAliasName, Name: ref.ForeignKey.DBName},
+								exprs[idx] = clause.Eq{
+									Column: clause.Column{Table: tableAliasName, Name: ref.ForeignKey.DBName},
 									Value:  ref.PrimaryValue,
 								}
 							}
@@ -148,7 +156,7 @@ func BuildQuerySQL(db *database.DB) {
 					}
 
 					{
-						onStmt := database.Statement{Table: tableAliasName, DB: db, Types: map[string]types.Type{}}
+						onStmt := database.Statement{Table: tableAliasName, DB: db, Clauses: map[string]clause.Clause{}}
 						for _, c := range relation.FieldSchema.QueryClauses {
 							onStmt.AddClause(c)
 						}
@@ -157,8 +165,8 @@ func BuildQuerySQL(db *database.DB) {
 							onStmt.AddClause(join.On)
 						}
 
-						if cs, ok := onStmt.Types["WHERE"]; ok {
-							if where, ok := cs.Expression.(types.Where); ok {
+						if cs, ok := onStmt.Clauses["WHERE"]; ok {
+							if where, ok := cs.Expression.(clause.Where); ok {
 								where.Build(&onStmt)
 
 								if onSQL := onStmt.SQL.String(); onSQL != "" {
@@ -170,20 +178,20 @@ func BuildQuerySQL(db *database.DB) {
 										onSQL = strings.Replace(onSQL, bindvar.String(), "?", 1)
 									}
 
-									exprs = append(exprs, types.Expr{SQL: onSQL, Vars: vars})
+									exprs = append(exprs, clause.Expr{SQL: onSQL, Vars: vars})
 								}
 							}
 						}
 					}
 
-					fromClause.Joins = append(fromClause.Joins, types.Join{
-						Type:  types.LeftJoin,
-						Table: types.Table{Name: relation.FieldSchema.Table, Alias: tableAliasName},
-						ON:    types.Where{Exprs: exprs},
+					fromClause.Joins = append(fromClause.Joins, clause.Join{
+						Type:  clause.LeftJoin,
+						Table: clause.Table{Name: relation.FieldSchema.Table, Alias: tableAliasName},
+						ON:    clause.Where{Exprs: exprs},
 					})
 				} else {
-					fromClause.Joins = append(fromClause.Joins, types.Join{
-						Expression: types.NamedExpr{SQL: join.Name, Vars: join.Conds},
+					fromClause.Joins = append(fromClause.Joins, clause.Join{
+						Expression: clause.NamedExpr{SQL: join.Name, Vars: join.Conds},
 					})
 				}
 			}
@@ -191,7 +199,7 @@ func BuildQuerySQL(db *database.DB) {
 			db.Statement.AddClause(fromClause)
 			db.Statement.Joins = nil
 		} else {
-			db.Statement.AddClauseIfNotExists(types.From{})
+			db.Statement.AddClauseIfNotExists(clause.From{})
 		}
 
 		db.Statement.AddClauseIfNotExists(clauseSelect)
@@ -210,7 +218,7 @@ func Preload(db *database.DB) {
 		preloadMap := map[string]map[string][]interface{}{}
 		for name := range db.Statement.Preloads {
 			preloadFields := strings.Split(name, ".")
-			if preloadFields[0] == types.Associations {
+			if preloadFields[0] == clause.Associations {
 				for _, rel := range db.Statement.Schema.Relationships.Relations {
 					if rel.Schema == db.Statement.Schema {
 						if _, ok := preloadMap[rel.Name]; !ok {
@@ -252,7 +260,7 @@ func Preload(db *database.DB) {
 
 		for _, name := range preloadNames {
 			if rel := preloadDB.Statement.Schema.Relationships.Relations[name]; rel != nil {
-				db.AddError(preload(preloadDB.Table("").Session(&database.Session{Context: db.Statement.Context, SkipHooks: db.Statement.SkipHooks}), rel, append(db.Statement.Preloads[name], db.Statement.Preloads[types.Associations]...), preloadMap[name]))
+				db.AddError(preload(preloadDB.Table("").Session(&database.Session{Context: db.Statement.Context, SkipHooks: db.Statement.SkipHooks}), rel, append(db.Statement.Preloads[name], db.Statement.Preloads[clause.Associations]...), preloadMap[name]))
 			} else {
 				db.AddError(fmt.Errorf("%s: %w for schema %s", name, database.ErrUnsupportedRelation, db.Statement.Schema.Name))
 			}

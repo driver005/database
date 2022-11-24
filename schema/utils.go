@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/utils"
 )
 
@@ -187,12 +187,12 @@ func ToQueryValues(table string, foreignKeys []string, foreignValues [][]interfa
 			queryValues[idx] = r[0]
 		}
 
-		return types.Column{Table: table, Name: foreignKeys[0]}, queryValues
+		return clause.Column{Table: table, Name: foreignKeys[0]}, queryValues
 	}
 
-	columns := make([]types.Column, len(foreignKeys))
+	columns := make([]clause.Column, len(foreignKeys))
 	for idx, key := range foreignKeys {
-		columns[idx] = types.Column{Table: table, Name: key}
+		columns[idx] = clause.Column{Table: table, Name: key}
 	}
 
 	for idx, r := range foreignValues {

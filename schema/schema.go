@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
-	"github.com/driver005/database/types"
 )
 
 // ErrUnsupportedDataType unsupported data type
@@ -28,10 +28,10 @@ type Schema struct {
 	FieldsByDBName            map[string]*Field
 	FieldsWithDefaultDBValue  []*Field // fields with default value assigned by database
 	Relationships             Relationships
-	CreateClauses             []types.Interface
-	QueryClauses              []types.Interface
-	UpdateClauses             []types.Interface
-	DeleteClauses             []types.Interface
+	CreateClauses             []clause.Interface
+	QueryClauses              []clause.Interface
+	UpdateClauses             []clause.Interface
+	DeleteClauses             []clause.Interface
 	BeforeCreate, AfterCreate bool
 	BeforeUpdate, AfterUpdate bool
 	BeforeDelete, AfterDelete bool

@@ -8,17 +8,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 // for Config.cacheStore store PreparedStmtDB key
 const preparedStmtDBKey = "preparedStmt"
 
-// Config database config
+// Config GORM config
 type Config struct {
-	// database perform single create, update, delete operations in transactions by default to ensure database data integrity
+	// GORM perform single create, update, delete operations in transactions by default to ensure database data integrity
 	// You can disable it by setting `SkipDefaultTransaction` to true
 	SkipDefaultTransaction bool
 	// NamingStrategy tables, columns naming strategy
@@ -46,8 +46,8 @@ type Config struct {
 	// CreateBatchSize default create batch size
 	CreateBatchSize int
 
-	// ClauseBuilders types builder
-	TypesBuilders map[string]types.TypesBuilder
+	// ClauseBuilders clause builder
+	ClauseBuilders map[string]clause.ClauseBuilder
 	// ConnPool db conn pool
 	ConnPool ConnPool
 	// Dialector database dialector
@@ -79,13 +79,13 @@ func (c *Config) AfterInitialize(db *DB) error {
 	return nil
 }
 
-// Option database option interface
+// Option gorm option interface
 type Option interface {
 	Apply(*Config) error
 	AfterInitialize(*DB) error
 }
 
-// DB DATABASE DB definition
+// DB GORM DB definition
 type DB struct {
 	*Config
 	Error        error
@@ -169,8 +169,8 @@ func Open(dialector Dialector, opts ...Option) (db *DB, err error) {
 
 	db.callbacks = initializeCallbacks(db)
 
-	if config.TypesBuilders == nil {
-		config.TypesBuilders = map[string]types.TypesBuilder{}
+	if config.ClauseBuilders == nil {
+		config.ClauseBuilders = map[string]clause.ClauseBuilder{}
 	}
 
 	if config.Dialector != nil {
@@ -179,7 +179,7 @@ func Open(dialector Dialector, opts ...Option) (db *DB, err error) {
 
 	preparedStmt := &PreparedStmtDB{
 		ConnPool:    db.ConnPool,
-		Stmts:       map[string]Stmt{},
+		Stmts:       make(map[string]*Stmt),
 		Mux:         &sync.RWMutex{},
 		PreparedSQL: make([]string, 0, 100),
 	}
@@ -193,7 +193,7 @@ func Open(dialector Dialector, opts ...Option) (db *DB, err error) {
 		DB:       db,
 		ConnPool: db.ConnPool,
 		Context:  context.Background(),
-		Types:  map[string]types.Type{},
+		Clauses:  map[string]clause.Clause{},
 	}
 
 	if err == nil && !config.DisableAutomaticPing {
@@ -248,10 +248,18 @@ func (db *DB) Session(config *Session) *DB {
 	if config.PrepareStmt {
 		if v, ok := db.cacheStore.Load(preparedStmtDBKey); ok {
 			preparedStmt := v.(*PreparedStmtDB)
-			tx.Statement.ConnPool = &PreparedStmtDB{
-				ConnPool: db.Config.ConnPool,
-				Mux:      preparedStmt.Mux,
-				Stmts:    preparedStmt.Stmts,
+			switch t := tx.Statement.ConnPool.(type) {
+			case Tx:
+				tx.Statement.ConnPool = &PreparedStmtTX{
+					Tx:             t,
+					PreparedStmtDB: preparedStmt,
+				}
+			default:
+				tx.Statement.ConnPool = &PreparedStmtDB{
+					ConnPool: db.Config.ConnPool,
+					Mux:      preparedStmt.Mux,
+					Stmts:    preparedStmt.Stmts,
+				}
 			}
 			txConfig.ConnPool = tx.Statement.ConnPool
 			txConfig.PrepareStmt = true
@@ -300,7 +308,8 @@ func (db *DB) WithContext(ctx context.Context) *DB {
 
 // Debug start debug mode
 func (db *DB) Debug() (tx *DB) {
-	return db.Session(&Session{
+	tx = db.getInstance()
+	return tx.Session(&Session{
 		Logger: db.Logger.LogMode(logger.Info),
 	})
 }
@@ -369,7 +378,7 @@ func (db *DB) getInstance() *DB {
 				DB:       tx,
 				ConnPool: db.Statement.ConnPool,
 				Context:  db.Statement.Context,
-				Types:  map[string]types.Type{},
+				Clauses:  map[string]clause.Clause{},
 				Vars:     make([]interface{}, 0, 8),
 			}
 		} else {
@@ -384,9 +393,9 @@ func (db *DB) getInstance() *DB {
 	return db
 }
 
-// Expr returns types.Expr, which can be used to pass SQL expression as params
-func Expr(expr string, args ...interface{}) types.Expr {
-	return types.Expr{SQL: expr, Vars: args}
+// Expr returns clause.Expr, which can be used to pass SQL expression as params
+func Expr(expr string, args ...interface{}) clause.Expr {
+	return clause.Expr{SQL: expr, Vars: args}
 }
 
 // SetupJoinTable setup join table schema
@@ -412,7 +421,7 @@ func (db *DB) SetupJoinTable(model interface{}, field string, joinTable interfac
 	relation, ok := modelSchema.Relationships.Relations[field]
 	isRelation := ok && relation.JoinTable != nil
 	if !isRelation {
-		return fmt.Errorf("failed to found relation: %s", field)
+		return fmt.Errorf("failed to find relation: %s", field)
 	}
 
 	for _, ref := range relation.References {
@@ -455,12 +464,12 @@ func (db *DB) Use(plugin Plugin) error {
 
 // ToSQL for generate SQL string.
 //
-// db.ToSQL(func(tx *database.DB) *database.DB {
-// 		return tx.Model(&User{}).Where(&User{Name: "foo", Age: 20})
-// 			.Limit(10).Offset(5)
-//			.Order("name ASC")
-//			.First(&User{})
-// })
+//	db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+//			return tx.Model(&User{}).Where(&User{Name: "foo", Age: 20})
+//				.Limit(10).Offset(5)
+//				.Order("name ASC")
+//				.First(&User{})
+//	})
 func (db *DB) ToSQL(queryFn func(tx *DB) *DB) string {
 	tx := queryFn(db.Session(&Session{DryRun: true, SkipDefaultTransaction: true}))
 	stmt := tx.Statement

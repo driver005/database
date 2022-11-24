@@ -13,7 +13,7 @@ var (
 	ErrInvalidTransaction = errors.New("invalid transaction")
 	// ErrNotImplemented not implemented
 	ErrNotImplemented = errors.New("not implemented")
-	// ErrMissingWhereClause missing where types
+	// ErrMissingWhereClause missing where clause
 	ErrMissingWhereClause = errors.New("WHERE conditions required")
 	// ErrUnsupportedRelation unsupported relations
 	ErrUnsupportedRelation = errors.New("unsupported relations")

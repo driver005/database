@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 var (
@@ -65,7 +65,7 @@ func (m Migrator) DataTypeOf(field *schema.Field) string {
 }
 
 // FullDataTypeOf returns field's db full data type
-func (m Migrator) FullDataTypeOf(field *schema.Field) (expr types.Expr) {
+func (m Migrator) FullDataTypeOf(field *schema.Field) (expr clause.Expr) {
 	expr.SQL = m.DataTypeOf(field)
 
 	if field.NotNull {
@@ -99,7 +99,7 @@ func (m Migrator) AutoMigrate(values ...interface{}) error {
 			}
 		} else {
 			if err := m.RunWithValue(value, func(stmt *database.Statement) (errr error) {
-				columnTypes, err := m.DB.Migrator().ColumnTypes(value)
+				columnclause, err := m.DB.Migrator().Columnclause(value)
 				if err != nil {
 					return err
 				}
@@ -108,7 +108,7 @@ func (m Migrator) AutoMigrate(values ...interface{}) error {
 					field := stmt.Schema.FieldsByDBName[dbName]
 					var foundColumn database.ColumnType
 
-					for _, columnType := range columnTypes {
+					for _, columnType := range columnclause {
 						if columnType.Name() == dbName {
 							foundColumn = columnType
 							break
@@ -186,7 +186,7 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 				if !field.IgnoreMigration {
 					createTableSQL += "? ?"
 					hasPrimaryKeyInDataType = hasPrimaryKeyInDataType || strings.Contains(strings.ToUpper(string(field.DataType)), "PRIMARY KEY")
-					values = append(values, types.Column{Name: dbName}, m.DB.Migrator().FullDataTypeOf(field))
+					values = append(values, clause.Column{Name: dbName}, m.DB.Migrator().FullDataTypeOf(field))
 					createTableSQL += ","
 				}
 			}
@@ -195,7 +195,7 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 				createTableSQL += "PRIMARY KEY ?,"
 				primaryKeys := []interface{}{}
 				for _, field := range stmt.Schema.PrimaryFields {
-					primaryKeys = append(primaryKeys, types.Column{Name: field.DBName})
+					primaryKeys = append(primaryKeys, clause.Column{Name: field.DBName})
 				}
 
 				values = append(values, primaryKeys)
@@ -223,7 +223,7 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 					}
 
 					createTableSQL += ","
-					values = append(values, types.Column{Name: idx.Name}, tx.Migrator().(BuildIndexOptionsInterface).BuildIndexOptions(idx.Fields, stmt))
+					values = append(values, clause.Column{Name: idx.Name}, tx.Migrator().(BuildIndexOptionsInterface).BuildIndexOptions(idx.Fields, stmt))
 				}
 			}
 
@@ -241,7 +241,7 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 
 			for _, chk := range stmt.Schema.ParseCheckConstraints() {
 				createTableSQL += "CONSTRAINT ? CHECK (?),"
-				values = append(values, types.Column{Name: chk.Name}, types.Expr{SQL: chk.Constraint})
+				values = append(values, clause.Column{Name: chk.Name}, clause.Expr{SQL: chk.Constraint})
 			}
 
 			createTableSQL = strings.TrimSuffix(createTableSQL, ",")
@@ -291,7 +291,7 @@ func (m Migrator) HasTable(value interface{}) bool {
 func (m Migrator) RenameTable(oldName, newName interface{}) error {
 	var oldTable, newTable interface{}
 	if v, ok := oldName.(string); ok {
-		oldTable = types.Table{Name: v}
+		oldTable = clause.Table{Name: v}
 	} else {
 		stmt := &database.Statement{DB: m.DB}
 		if err := stmt.Parse(oldName); err == nil {
@@ -302,7 +302,7 @@ func (m Migrator) RenameTable(oldName, newName interface{}) error {
 	}
 
 	if v, ok := newName.(string); ok {
-		newTable = types.Table{Name: v}
+		newTable = clause.Table{Name: v}
 	} else {
 		stmt := &database.Statement{DB: m.DB}
 		if err := stmt.Parse(newName); err == nil {
@@ -327,7 +327,7 @@ func (m Migrator) AddColumn(value interface{}, name string) error {
 		if !f.IgnoreMigration {
 			return m.DB.Exec(
 				"ALTER TABLE ? ADD ? ?",
-				m.CurrentTable(stmt), types.Column{Name: f.DBName}, m.DB.Migrator().FullDataTypeOf(f),
+				m.CurrentTable(stmt), clause.Column{Name: f.DBName}, m.DB.Migrator().FullDataTypeOf(f),
 			).Error
 		}
 
@@ -343,7 +343,7 @@ func (m Migrator) DropColumn(value interface{}, name string) error {
 		}
 
 		return m.DB.Exec(
-			"ALTER TABLE ? DROP COLUMN ?", m.CurrentTable(stmt), types.Column{Name: name},
+			"ALTER TABLE ? DROP COLUMN ?", m.CurrentTable(stmt), clause.Column{Name: name},
 		).Error
 	})
 }
@@ -355,7 +355,7 @@ func (m Migrator) AlterColumn(value interface{}, field string) error {
 			fileType := m.FullDataTypeOf(field)
 			return m.DB.Exec(
 				"ALTER TABLE ? ALTER COLUMN ? TYPE ?",
-				m.CurrentTable(stmt), types.Column{Name: field.DBName}, fileType,
+				m.CurrentTable(stmt), clause.Column{Name: field.DBName}, fileType,
 			).Error
 
 		}
@@ -395,7 +395,7 @@ func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error
 
 		return m.DB.Exec(
 			"ALTER TABLE ? RENAME COLUMN ? TO ?",
-			m.CurrentTable(stmt), types.Column{Name: oldName}, types.Column{Name: newName},
+			m.CurrentTable(stmt), clause.Column{Name: oldName}, clause.Column{Name: newName},
 		).Error
 	})
 }
@@ -470,9 +470,9 @@ func (m Migrator) MigrateColumn(value interface{}, field *schema.Field, columnTy
 	return nil
 }
 
-// ColumnTypes return columnTypes []database.ColumnType and execErr error
-func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) {
-	columnTypes := make([]database.ColumnType, 0)
+// Columnclause return columnclause []database.ColumnType and execErr error
+func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error) {
+	columnclause := make([]database.ColumnType, 0)
 	execErr := m.RunWithValue(value, func(stmt *database.Statement) (err error) {
 		rows, err := m.DB.Session(&database.Session{}).Table(stmt.Table).Limit(1).Rows()
 		if err != nil {
@@ -483,20 +483,20 @@ func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) 
 			err = rows.Close()
 		}()
 
-		var rawColumnTypes []*sql.ColumnType
-		rawColumnTypes, err = rows.ColumnTypes()
+		var rawColumnclause []*sql.ColumnType
+		rawColumnclause, err = rows.Columnclause()
 		if err != nil {
 			return err
 		}
 
-		for _, c := range rawColumnTypes {
-			columnTypes = append(columnTypes, ColumnType{SQLColumnType: c})
+		for _, c := range rawColumnclause {
+			columnclause = append(columnclause, ColumnType{SQLColumnType: c})
 		}
 
 		return
 	})
 
-	return columnTypes, execErr
+	return columnclause, execErr
 }
 
 // CreateView create view
@@ -521,13 +521,13 @@ func buildConstraint(constraint *schema.Constraint) (sql string, results []inter
 
 	var foreignKeys, references []interface{}
 	for _, field := range constraint.ForeignKeys {
-		foreignKeys = append(foreignKeys, types.Column{Name: field.DBName})
+		foreignKeys = append(foreignKeys, clause.Column{Name: field.DBName})
 	}
 
 	for _, field := range constraint.References {
-		references = append(references, types.Column{Name: field.DBName})
+		references = append(references, clause.Column{Name: field.DBName})
 	}
-	results = append(results, types.Table{Name: constraint.Name}, foreignKeys, types.Table{Name: constraint.ReferenceSchema.Table}, references)
+	results = append(results, clause.Table{Name: constraint.Name}, foreignKeys, clause.Table{Name: constraint.ReferenceSchema.Table}, references)
 	return
 }
 
@@ -583,12 +583,12 @@ func (m Migrator) CreateConstraint(value interface{}, name string) error {
 		if chk != nil {
 			return m.DB.Exec(
 				"ALTER TABLE ? ADD CONSTRAINT ? CHECK (?)",
-				m.CurrentTable(stmt), types.Column{Name: chk.Name}, types.Expr{SQL: chk.Constraint},
+				m.CurrentTable(stmt), clause.Column{Name: chk.Name}, clause.Expr{SQL: chk.Constraint},
 			).Error
 		}
 
 		if constraint != nil {
-			vars := []interface{}{types.Table{Name: table}}
+			vars := []interface{}{clause.Table{Name: table}}
 			if stmt.TableExpr != nil {
 				vars[0] = stmt.TableExpr
 			}
@@ -609,7 +609,7 @@ func (m Migrator) DropConstraint(value interface{}, name string) error {
 		} else if chk != nil {
 			name = chk.Name
 		}
-		return m.DB.Exec("ALTER TABLE ? DROP CONSTRAINT ?", types.Table{Name: table}, types.Column{Name: name}).Error
+		return m.DB.Exec("ALTER TABLE ? DROP CONSTRAINT ?", clause.Table{Name: table}, clause.Column{Name: name}).Error
 	})
 }
 
@@ -651,7 +651,7 @@ func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *database.St
 		if opt.Sort != "" {
 			str += " " + opt.Sort
 		}
-		results = append(results, types.Expr{SQL: str})
+		results = append(results, clause.Expr{SQL: str})
 	}
 	return
 }
@@ -666,7 +666,7 @@ func (m Migrator) CreateIndex(value interface{}, name string) error {
 	return m.RunWithValue(value, func(stmt *database.Statement) error {
 		if idx := stmt.Schema.LookIndex(name); idx != nil {
 			opts := m.DB.Migrator().(BuildIndexOptionsInterface).BuildIndexOptions(idx.Fields, stmt)
-			values := []interface{}{types.Column{Name: idx.Name}, m.CurrentTable(stmt), opts}
+			values := []interface{}{clause.Column{Name: idx.Name}, m.CurrentTable(stmt), opts}
 
 			createIndexSQL := "CREATE "
 			if idx.Class != "" {
@@ -700,7 +700,7 @@ func (m Migrator) DropIndex(value interface{}, name string) error {
 			name = idx.Name
 		}
 
-		return m.DB.Exec("DROP INDEX ? ON ?", types.Column{Name: name}, m.CurrentTable(stmt)).Error
+		return m.DB.Exec("DROP INDEX ? ON ?", clause.Column{Name: name}, m.CurrentTable(stmt)).Error
 	})
 }
 
@@ -727,7 +727,7 @@ func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error 
 	return m.RunWithValue(value, func(stmt *database.Statement) error {
 		return m.DB.Exec(
 			"ALTER TABLE ? RENAME INDEX ? TO ?",
-			m.CurrentTable(stmt), types.Column{Name: oldName}, types.Column{Name: newName},
+			m.CurrentTable(stmt), clause.Column{Name: oldName}, clause.Column{Name: newName},
 		).Error
 	})
 }
@@ -842,5 +842,5 @@ func (m Migrator) CurrentTable(stmt *database.Statement) interface{} {
 	if stmt.TableExpr != nil {
 		return *stmt.TableExpr
 	}
-	return types.Table{Name: stmt.Table}
+	return clause.Table{Name: stmt.Table}
 }

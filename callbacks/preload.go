@@ -5,8 +5,8 @@ import (
 	"reflect"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -34,7 +34,7 @@ func preload(tx *database.DB, rel *schema.Relationship, conds []interface{}, pre
 				joinForeignFields = append(joinForeignFields, ref.ForeignKey)
 				foreignFields = append(foreignFields, ref.PrimaryKey)
 			} else if ref.PrimaryValue != "" {
-				tx = tx.Where(types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+				tx = tx.Where(clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 			} else {
 				joinRelForeignFields = append(joinRelForeignFields, ref.ForeignKey)
 				relForeignKeys = append(relForeignKeys, ref.PrimaryKey.DBName)
@@ -48,8 +48,8 @@ func preload(tx *database.DB, rel *schema.Relationship, conds []interface{}, pre
 		}
 
 		joinResults := rel.JoinTable.MakeSlice().Elem()
-		column, values := schema.ToQueryValues(types.CurrentTable, joinForeignKeys, joinForeignValues)
-		if err := tx.Where(types.IN{Column: column, Values: values}).Find(joinResults.Addr().Interface()).Error; err != nil {
+		column, values := schema.ToQueryValues(clause.CurrentTable, joinForeignKeys, joinForeignValues)
+		if err := tx.Where(clause.IN{Column: column, Values: values}).Find(joinResults.Addr().Interface()).Error; err != nil {
 			return err
 		}
 
@@ -80,7 +80,7 @@ func preload(tx *database.DB, rel *schema.Relationship, conds []interface{}, pre
 				relForeignFields = append(relForeignFields, ref.ForeignKey)
 				foreignFields = append(foreignFields, ref.PrimaryKey)
 			} else if ref.PrimaryValue != "" {
-				tx = tx.Where(types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+				tx = tx.Where(clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 			} else {
 				relForeignKeys = append(relForeignKeys, ref.PrimaryKey.DBName)
 				relForeignFields = append(relForeignFields, ref.PrimaryKey)
@@ -100,7 +100,7 @@ func preload(tx *database.DB, rel *schema.Relationship, conds []interface{}, pre
 	}
 
 	reflectResults := rel.FieldSchema.MakeSlice().Elem()
-	column, values := schema.ToQueryValues(types.CurrentTable, relForeignKeys, foreignValues)
+	column, values := schema.ToQueryValues(clause.CurrentTable, relForeignKeys, foreignValues)
 
 	if len(values) != 0 {
 		for _, cond := range conds {
@@ -111,7 +111,7 @@ func preload(tx *database.DB, rel *schema.Relationship, conds []interface{}, pre
 			}
 		}
 
-		if err := tx.Where(types.IN{Column: column, Values: values}).Find(reflectResults.Addr().Interface(), inlineConds...).Error; err != nil {
+		if err := tx.Where(clause.IN{Column: column, Values: values}).Find(reflectResults.Addr().Interface(), inlineConds...).Error; err != nil {
 			return err
 		}
 	}

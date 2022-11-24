@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -206,9 +206,12 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 								}
 							}
 
-							cacheKey := utils.ToStringKey(relPrimaryValues)
+							cacheKey := utils.ToStringKey(relPrimaryValues...)
 							if len(relPrimaryValues) != len(rel.FieldSchema.PrimaryFields) || !identityMap[cacheKey] {
-								identityMap[cacheKey] = true
+								if cacheKey != "" { // has primary fields
+									identityMap[cacheKey] = true
+								}
+
 								if isPtr {
 									elems = reflect.Append(elems, elem)
 								} else {
@@ -253,6 +256,7 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 					fieldType = reflect.PtrTo(fieldType)
 				}
 				elems := reflect.MakeSlice(reflect.SliceOf(fieldType), 0, 10)
+				distinctElems := reflect.MakeSlice(reflect.SliceOf(fieldType), 0, 10)
 				joins := reflect.MakeSlice(reflect.SliceOf(reflect.PtrTo(rel.JoinTable.ModelType)), 0, 10)
 				objs := []reflect.Value{}
 
@@ -272,19 +276,34 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 					joins = reflect.Append(joins, joinValue)
 				}
 
+				identityMap := map[string]bool{}
 				appendToElems := func(v reflect.Value) {
 					if _, zero := rel.Field.ValueOf(db.Statement.Context, v); !zero {
 						f := reflect.Indirect(rel.Field.ReflectValueOf(db.Statement.Context, v))
-
 						for i := 0; i < f.Len(); i++ {
 							elem := f.Index(i)
-
-							objs = append(objs, v)
-							if isPtr {
-								elems = reflect.Append(elems, elem)
-							} else {
-								elems = reflect.Append(elems, elem.Addr())
+							if !isPtr {
+								elem = elem.Addr()
 							}
+							objs = append(objs, v)
+							elems = reflect.Append(elems, elem)
+
+							relPrimaryValues := make([]interface{}, 0, len(rel.FieldSchema.PrimaryFields))
+							for _, pf := range rel.FieldSchema.PrimaryFields {
+								if pfv, ok := pf.ValueOf(db.Statement.Context, elem); !ok {
+									relPrimaryValues = append(relPrimaryValues, pfv)
+								}
+							}
+
+							cacheKey := utils.ToStringKey(relPrimaryValues...)
+							if len(relPrimaryValues) != len(rel.FieldSchema.PrimaryFields) || !identityMap[cacheKey] {
+								if cacheKey != "" { // has primary fields
+									identityMap[cacheKey] = true
+								}
+
+								distinctElems = reflect.Append(distinctElems, elem)
+							}
+
 						}
 					}
 				}
@@ -304,7 +323,7 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 				// optimize elems of reflect value length
 				if elemLen := elems.Len(); elemLen > 0 {
 					if v, ok := selectColumns[rel.Name+".*"]; !ok || v {
-						saveAssociations(db, rel, elems, selectColumns, restricted, nil)
+						saveAssociations(db, rel, distinctElems, selectColumns, restricted, nil)
 					}
 
 					for i := 0; i < elemLen; i++ {
@@ -313,7 +332,7 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 				}
 
 				if joins.Len() > 0 {
-					db.AddError(db.Session(&database.Session{NewDB: true}).Types(types.OnConflict{DoNothing: true}).Session(&database.Session{
+					db.AddError(db.Session(&database.Session{NewDB: true}).Clauses(clause.OnConflict{DoNothing: true}).Session(&database.Session{
 						SkipHooks:                db.Statement.SkipHooks,
 						DisableNestedTransaction: true,
 					}).Create(joins.Interface()).Error)
@@ -323,16 +342,16 @@ func SaveAfterAssociations(create bool) func(db *database.DB) {
 	}
 }
 
-func onConflictOption(stmt *database.Statement, s *schema.Schema, defaultUpdatingColumns []string) (onConflict types.OnConflict) {
+func onConflictOption(stmt *database.Statement, s *schema.Schema, defaultUpdatingColumns []string) (onConflict clause.OnConflict) {
 	if len(defaultUpdatingColumns) > 0 || stmt.DB.FullSaveAssociations {
-		onConflict.Columns = make([]types.Column, 0, len(s.PrimaryFieldDBNames))
+		onConflict.Columns = make([]clause.Column, 0, len(s.PrimaryFieldDBNames))
 		for _, dbName := range s.PrimaryFieldDBNames {
-			onConflict.Columns = append(onConflict.Columns, types.Column{Name: dbName})
+			onConflict.Columns = append(onConflict.Columns, clause.Column{Name: dbName})
 		}
 
 		onConflict.UpdateAll = stmt.DB.FullSaveAssociations
 		if !onConflict.UpdateAll {
-			onConflict.DoUpdates = types.AssignmentColumns(defaultUpdatingColumns)
+			onConflict.DoUpdates = clause.AssignmentColumns(defaultUpdatingColumns)
 		}
 	} else {
 		onConflict.DoNothing = true
@@ -369,7 +388,7 @@ func saveAssociations(db *database.DB, rel *schema.Relationship, rValues reflect
 		}
 	}
 
-	tx := db.Session(&database.Session{NewDB: true}).Types(onConflict).Session(&database.Session{
+	tx := db.Session(&database.Session{NewDB: true}).Clauses(onConflict).Session(&database.Session{
 		FullSaveAssociations:     db.FullSaveAssociations,
 		SkipHooks:                db.Statement.SkipHooks,
 		DisableNestedTransaction: true,
@@ -387,7 +406,7 @@ func saveAssociations(db *database.DB, rel *schema.Relationship, rValues reflect
 	if len(selects) > 0 {
 		tx = tx.Select(selects)
 	} else if restricted && len(omits) == 0 {
-		tx = tx.Omit(types.Associations)
+		tx = tx.Omit(clause.Associations)
 	}
 
 	if len(omits) > 0 {

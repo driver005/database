@@ -4,23 +4,23 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
-// Dialector DATABASE database dialector
+// Dialector Database database dialector
 type Dialector interface {
 	Name() string
 	Initialize(*DB) error
 	Migrator(db *DB) Migrator
 	DataTypeOf(*schema.Field) string
-	DefaultValueOf(*schema.Field) types.Expression
-	BindVarTo(writer types.Writer, stmt *Statement, v interface{})
-	QuoteTo(types.Writer, string)
+	DefaultValueOf(*schema.Field) clause.Expression
+	BindVarTo(writer clause.Writer, stmt *Statement, v interface{})
+	QuoteTo(clause.Writer, string)
 	Explain(sql string, vars ...interface{}) string
 }
 
-// Plugin DATABASE plugin interface
+// Plugin Database plugin interface
 type Plugin interface {
 	Name() string
 	Initialize(*DB) error
@@ -65,7 +65,7 @@ type Tx interface {
 
 // Valuer database valuer interface
 type Valuer interface {
-	DBValue(context.Context, *DB) types.Expr
+	DBValue(context.Context, *DB) clause.Expr
 }
 
 // GetDBConnector SQL db connector

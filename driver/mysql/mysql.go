@@ -10,10 +10,10 @@ import (
 
 	"github.com/driver005/database"
 	"github.com/driver005/database/callbacks"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/migrator"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -136,24 +136,24 @@ func (dialector Dialector) Initialize(db *database.DB) (err error) {
 	}
 
 	for k, v := range dialector.ClauseBuilders() {
-		db.TypesBuilders[k] = v
+		db.clauseBuilders[k] = v
 	}
 	return
 }
 
 const (
-	// ClauseOnConflict for types.TypesBuilder ON CONFLICT key
+	// ClauseOnConflict for clause.clauseBuilder ON CONFLICT key
 	ClauseOnConflict = "ON CONFLICT"
-	// ClauseValues for types.TypesBuilder VALUES key
+	// ClauseValues for clause.clauseBuilder VALUES key
 	ClauseValues = "VALUES"
-	// ClauseValues for types.TypesBuilder FOR key
+	// ClauseValues for clause.clauseBuilder FOR key
 	ClauseFor = "FOR"
 )
 
-func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
-	clauseBuilders := map[string]types.TypesBuilder{
-		ClauseOnConflict: func(c types.Type, builder types.Builder) {
-			onConflict, ok := c.Expression.(types.OnConflict)
+func (dialector Dialector) ClauseBuilders() map[string]clause.clauseBuilder {
+	clauseBuilders := map[string]clause.clauseBuilder{
+		ClauseOnConflict: func(c clause.Type, builder clause.Builder) {
+			onConflict, ok := c.Expression.(clause.OnConflict)
 			if !ok {
 				c.Build(builder)
 				return
@@ -162,17 +162,17 @@ func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
 			builder.WriteString("ON DUPLICATE KEY UPDATE ")
 			if len(onConflict.DoUpdates) == 0 {
 				if s := builder.(*database.Statement).Schema; s != nil {
-					var column types.Column
+					var column clause.Column
 					onConflict.DoNothing = false
 
 					if s.PrioritizedPrimaryField != nil {
-						column = types.Column{Name: s.PrioritizedPrimaryField.DBName}
+						column = clause.Column{Name: s.PrioritizedPrimaryField.DBName}
 					} else if len(s.DBNames) > 0 {
-						column = types.Column{Name: s.DBNames[0]}
+						column = clause.Column{Name: s.DBNames[0]}
 					}
 
 					if column.Name != "" {
-						onConflict.DoUpdates = []types.Assignment{{Column: column, Value: column}}
+						onConflict.DoUpdates = []clause.Assignment{{Column: column, Value: column}}
 					}
 				}
 			}
@@ -184,7 +184,7 @@ func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
 
 				builder.WriteQuoted(assignment.Column)
 				builder.WriteByte('=')
-				if column, ok := assignment.Value.(types.Column); ok && column.Table == "excluded" {
+				if column, ok := assignment.Value.(clause.Column); ok && column.Table == "excluded" {
 					column.Table = ""
 					builder.WriteString("VALUES(")
 					builder.WriteQuoted(column)
@@ -194,8 +194,8 @@ func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
 				}
 			}
 		},
-		ClauseValues: func(c types.Type, builder types.Builder) {
-			if values, ok := c.Expression.(types.Values); ok && len(values.Columns) == 0 {
+		ClauseValues: func(c clause.Type, builder clause.Builder) {
+			if values, ok := c.Expression.(clause.Values); ok && len(values.Columns) == 0 {
 				builder.WriteString("VALUES()")
 				return
 			}
@@ -204,8 +204,8 @@ func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
 	}
 
 	if dialector.Config.DontSupportForShareClause {
-		clauseBuilders[ClauseFor] = func(c types.Type, builder types.Builder) {
-			if values, ok := c.Expression.(types.Locking); ok && strings.EqualFold(values.Strength, "SHARE") {
+		clauseBuilders[ClauseFor] = func(c clause.Type, builder clause.Builder) {
+			if values, ok := c.Expression.(clause.Locking); ok && strings.EqualFold(values.Strength, "SHARE") {
 				builder.WriteString("LOCK IN SHARE MODE")
 				return
 			}
@@ -216,8 +216,8 @@ func (dialector Dialector) ClauseBuilders() map[string]types.TypesBuilder {
 	return clauseBuilders
 }
 
-func (dialector Dialector) DefaultValueOf(field *schema.Field) types.Expression {
-	return types.Expr{SQL: "DEFAULT"}
+func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
+	return clause.Expr{SQL: "DEFAULT"}
 }
 
 func (dialector Dialector) Migrator(db *database.DB) database.Migrator {
@@ -232,11 +232,11 @@ func (dialector Dialector) Migrator(db *database.DB) database.Migrator {
 	}
 }
 
-func (dialector Dialector) BindVarTo(writer types.Writer, stmt *database.Statement, v interface{}) {
+func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *database.Statement, v interface{}) {
 	writer.WriteByte('?')
 }
 
-func (dialector Dialector) QuoteTo(writer types.Writer, str string) {
+func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	var (
 		underQuoted, selfQuoted bool
 		continuousBacktick      int8

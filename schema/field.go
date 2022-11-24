@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/utils"
 	"github.com/jinzhu/now"
 )
 
-// special types' reflect type
+// special clause' reflect type
 var (
 	TimeReflectType    = reflect.TypeOf(time.Time{})
 	TimePtrReflectType = reflect.TypeOf(&time.Time{})
@@ -30,7 +30,7 @@ type (
 	TimeType int64
 )
 
-// DATABASE time types
+// DATABASE time clause
 const (
 	UnixTime        TimeType = 1
 	UnixSecond      TimeType = 2
@@ -38,7 +38,7 @@ const (
 	UnixNanosecond  TimeType = 4
 )
 
-// DATABASE fields types
+// DATABASE fields clause
 const (
 	Bool   DataType = "bool"
 	Int    DataType = "int"
@@ -571,7 +571,7 @@ func (field *Field) setupValuerAndSetter() {
 				if v, err = valuer.Value(); err == nil {
 					err = setter(ctx, value, v)
 				}
-			} else if _, ok := v.(types.Expr); !ok {
+			} else if _, ok := v.(clause.Expr); !ok {
 				return fmt.Errorf("failed to set value %#v to field %s", v, field.Name)
 			}
 		}

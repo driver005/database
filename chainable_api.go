@@ -5,28 +5,29 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/utils"
 )
 
 // Model specify the model you would like to run db operations
-//    // update all users's name to `hello`
-//    db.Model(&User{}).Update("name", "hello")
-//    // if user's primary key is non-blank, will use it as condition, then will only update the user's name to `hello`
-//    db.Model(&user).Update("name", "hello")
+//
+//	// update all users's name to `hello`
+//	db.Model(&User{}).Update("name", "hello")
+//	// if user's primary key is non-blank, will use it as condition, then will only update the user's name to `hello`
+//	db.Model(&user).Update("name", "hello")
 func (db *DB) Model(value interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Model = value
 	return
 }
 
-// Types Add clauses
-func (db *DB) Types(conds ...types.Expression) (tx *DB) {
+// Clauses Add clauses
+func (db *DB) Clauses(conds ...clause.Expression) (tx *DB) {
 	tx = db.getInstance()
 	var whereConds []interface{}
 
 	for _, cond := range conds {
-		if c, ok := cond.(types.Interface); ok {
+		if c, ok := cond.(clause.Interface); ok {
 			tx.Statement.AddClause(c)
 		} else if optimizer, ok := cond.(StatementModifier); ok {
 			optimizer.ModifyStatement(tx.Statement)
@@ -36,7 +37,7 @@ func (db *DB) Types(conds ...types.Expression) (tx *DB) {
 	}
 
 	if len(whereConds) > 0 {
-		tx.Statement.AddClause(types.Where{Exprs: tx.Statement.BuildCondition(whereConds[0], whereConds[1:]...)})
+		tx.Statement.AddClause(clause.Where{Exprs: tx.Statement.BuildCondition(whereConds[0], whereConds[1:]...)})
 	}
 	return
 }
@@ -47,15 +48,15 @@ var tableRegexp = regexp.MustCompile(`(?i).+? AS (\w+)\s*(?:$|,)`)
 func (db *DB) Table(name string, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if strings.Contains(name, " ") || strings.Contains(name, "`") || len(args) > 0 {
-		tx.Statement.TableExpr = &types.Expr{SQL: name, Vars: args}
+		tx.Statement.TableExpr = &clause.Expr{SQL: name, Vars: args}
 		if results := tableRegexp.FindStringSubmatch(name); len(results) == 2 {
 			tx.Statement.Table = results[1]
 		}
 	} else if tables := strings.Split(name, "."); len(tables) == 2 {
-		tx.Statement.TableExpr = &types.Expr{SQL: tx.Statement.Quote(name)}
+		tx.Statement.TableExpr = &clause.Expr{SQL: tx.Statement.Quote(name)}
 		tx.Statement.Table = tables[1]
 	} else if name != "" {
-		tx.Statement.TableExpr = &types.Expr{SQL: tx.Statement.Quote(name)}
+		tx.Statement.TableExpr = &clause.Expr{SQL: tx.Statement.Quote(name)}
 		tx.Statement.Table = name
 	} else {
 		tx.Statement.TableExpr = nil
@@ -94,20 +95,20 @@ func (db *DB) Select(query interface{}, args ...interface{}) (tx *DB) {
 			}
 		}
 
-		if types, ok := tx.Statement.Types["SELECT"]; ok {
-			types.Expression = nil
-			tx.Statement.Types["SELECT"] = types
+		if clause, ok := tx.Statement.Clauses["SELECT"]; ok {
+			clause.Expression = nil
+			tx.Statement.Clauses["SELECT"] = clause
 		}
 	case string:
 		if strings.Count(v, "?") >= len(args) && len(args) > 0 {
-			tx.Statement.AddClause(types.Select{
+			tx.Statement.AddClause(clause.Select{
 				Distinct:   db.Statement.Distinct,
-				Expression: types.Expr{SQL: v, Vars: args},
+				Expression: clause.Expr{SQL: v, Vars: args},
 			})
 		} else if strings.Count(v, "@") > 0 && len(args) > 0 {
-			tx.Statement.AddClause(types.Select{
+			tx.Statement.AddClause(clause.Select{
 				Distinct:   db.Statement.Distinct,
-				Expression: types.NamedExpr{SQL: v, Vars: args},
+				Expression: clause.NamedExpr{SQL: v, Vars: args},
 			})
 		} else {
 			tx.Statement.Selects = []string{v}
@@ -119,17 +120,17 @@ func (db *DB) Select(query interface{}, args ...interface{}) (tx *DB) {
 				case []string:
 					tx.Statement.Selects = append(tx.Statement.Selects, arg...)
 				default:
-					tx.Statement.AddClause(types.Select{
+					tx.Statement.AddClause(clause.Select{
 						Distinct:   db.Statement.Distinct,
-						Expression: types.Expr{SQL: v, Vars: args},
+						Expression: clause.Expr{SQL: v, Vars: args},
 					})
 					return
 				}
 			}
 
-			if types, ok := tx.Statement.Types["SELECT"]; ok {
-				types.Expression = nil
-				tx.Statement.Types["SELECT"] = types
+			if clause, ok := tx.Statement.Clauses["SELECT"]; ok {
+				clause.Expression = nil
+				tx.Statement.Clauses["SELECT"] = clause
 			}
 		}
 	default:
@@ -155,7 +156,7 @@ func (db *DB) Omit(columns ...string) (tx *DB) {
 func (db *DB) Where(query interface{}, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if conds := tx.Statement.BuildCondition(query, args...); len(conds) > 0 {
-		tx.Statement.AddClause(types.Where{Exprs: conds})
+		tx.Statement.AddClause(clause.Where{Exprs: conds})
 	}
 	return
 }
@@ -164,7 +165,7 @@ func (db *DB) Where(query interface{}, args ...interface{}) (tx *DB) {
 func (db *DB) Not(query interface{}, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if conds := tx.Statement.BuildCondition(query, args...); len(conds) > 0 {
-		tx.Statement.AddClause(types.Where{Exprs: []types.Expression{types.Not(conds...)}})
+		tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Not(conds...)}})
 	}
 	return
 }
@@ -173,24 +174,27 @@ func (db *DB) Not(query interface{}, args ...interface{}) (tx *DB) {
 func (db *DB) Or(query interface{}, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if conds := tx.Statement.BuildCondition(query, args...); len(conds) > 0 {
-		tx.Statement.AddClause(types.Where{Exprs: []types.Expression{types.Or(types.And(conds...))}})
+		tx.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Or(clause.And(conds...))}})
 	}
 	return
 }
 
 // Joins specify Joins conditions
-//     db.Joins("Account").Find(&user)
-//     db.Joins("JOIN emails ON emails.user_id = users.id AND emails.email = ?", "jinzhu@example.org").Find(&user)
-//     db.Joins("Account", DB.Select("id").Where("user_id = users.id AND name = ?", "someName").Model(&Account{}))
+//
+//	db.Joins("Account").Find(&user)
+//	db.Joins("JOIN emails ON emails.user_id = users.id AND emails.email = ?", "jinzhu@example.org").Find(&user)
+//	db.Joins("Account", DB.Select("id").Where("user_id = users.id AND name = ?", "someName").Model(&Account{}))
 func (db *DB) Joins(query string, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 
 	if len(args) == 1 {
 		if db, ok := args[0].(*DB); ok {
-			if where, ok := db.Statement.Types["WHERE"].Expression.(types.Where); ok {
-				tx.Statement.Joins = append(tx.Statement.Joins, join{Name: query, Conds: args, On: &where})
-				return
+			j := join{Name: query, Conds: args, Selects: db.Statement.Selects, Omits: db.Statement.Omits}
+			if where, ok := db.Statement.Clauses["WHERE"].Expression.(clause.Where); ok {
+				j.On = &where
 			}
+			tx.Statement.Joins = append(tx.Statement.Joins, j)
+			return
 		}
 	}
 
@@ -203,8 +207,8 @@ func (db *DB) Group(name string) (tx *DB) {
 	tx = db.getInstance()
 
 	fields := strings.FieldsFunc(name, utils.IsValidDBNameChar)
-	tx.Statement.AddClause(types.GroupBy{
-		Columns: []types.Column{{Name: name, Raw: len(fields) != 1}},
+	tx.Statement.AddClause(clause.GroupBy{
+		Columns: []clause.Column{{Name: name, Raw: len(fields) != 1}},
 	})
 	return
 }
@@ -212,28 +216,29 @@ func (db *DB) Group(name string) (tx *DB) {
 // Having specify HAVING conditions for GROUP BY
 func (db *DB) Having(query interface{}, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
-	tx.Statement.AddClause(types.GroupBy{
+	tx.Statement.AddClause(clause.GroupBy{
 		Having: tx.Statement.BuildCondition(query, args...),
 	})
 	return
 }
 
 // Order specify order when retrieve records from database
-//     db.Order("name DESC")
-//     db.Order(types.OrderByColumn{Column: types.Column{Name: "name"}, Desc: true})
+//
+//	db.Order("name DESC")
+//	db.Order(clause.OrderByColumn{Column: clause.Column{Name: "name"}, Desc: true})
 func (db *DB) Order(value interface{}) (tx *DB) {
 	tx = db.getInstance()
 
 	switch v := value.(type) {
-	case types.OrderByColumn:
-		tx.Statement.AddClause(types.OrderBy{
-			Columns: []types.OrderByColumn{v},
+	case clause.OrderByColumn:
+		tx.Statement.AddClause(clause.OrderBy{
+			Columns: []clause.OrderByColumn{v},
 		})
 	case string:
 		if v != "" {
-			tx.Statement.AddClause(types.OrderBy{
-				Columns: []types.OrderByColumn{{
-					Column: types.Column{Name: v, Raw: true},
+			tx.Statement.AddClause(clause.OrderBy{
+				Columns: []clause.OrderByColumn{{
+					Column: clause.Column{Name: v, Raw: true},
 				}},
 			})
 		}
@@ -244,29 +249,30 @@ func (db *DB) Order(value interface{}) (tx *DB) {
 // Limit specify the number of records to be retrieved
 func (db *DB) Limit(limit int) (tx *DB) {
 	tx = db.getInstance()
-	tx.Statement.AddClause(types.Limit{Limit: limit})
+	tx.Statement.AddClause(clause.Limit{Limit: &limit})
 	return
 }
 
 // Offset specify the number of records to skip before starting to return the records
 func (db *DB) Offset(offset int) (tx *DB) {
 	tx = db.getInstance()
-	tx.Statement.AddClause(types.Limit{Offset: offset})
+	tx.Statement.AddClause(clause.Limit{Offset: offset})
 	return
 }
 
 // Scopes pass current database connection to arguments `func(DB) DB`, which could be used to add conditions dynamically
-//     func AmountGreaterThan1000(db *database.DB) *database.DB {
-//         return db.Where("amount > ?", 1000)
-//     }
 //
-//     func OrderStatus(status []string) func (db *database.DB) *database.DB {
-//         return func (db *database.DB) *database.DB {
-//             return db.Scopes(AmountGreaterThan1000).Where("status in (?)", status)
-//         }
-//     }
+//	func AmountGreaterThan1000(db *gorm.DB) *gorm.DB {
+//	    return db.Where("amount > ?", 1000)
+//	}
 //
-//     db.Scopes(AmountGreaterThan1000, OrderStatus([]string{"paid", "shipped"})).Find(&orders)
+//	func OrderStatus(status []string) func (db *gorm.DB) *gorm.DB {
+//	    return func (db *gorm.DB) *gorm.DB {
+//	        return db.Scopes(AmountGreaterThan1000).Where("status in (?)", status)
+//	    }
+//	}
+//
+//	db.Scopes(AmountGreaterThan1000, OrderStatus([]string{"paid", "shipped"})).Find(&orders)
 func (db *DB) Scopes(funcs ...func(*DB) *DB) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.scopes = append(tx.Statement.scopes, funcs...)
@@ -274,7 +280,8 @@ func (db *DB) Scopes(funcs ...func(*DB) *DB) (tx *DB) {
 }
 
 // Preload preload associations with given conditions
-//    db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
+//
+//	db.Preload("Orders", "state NOT IN (?)", "cancelled").Find(&users)
 func (db *DB) Preload(query string, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if tx.Statement.Preloads == nil {
@@ -307,9 +314,9 @@ func (db *DB) Raw(sql string, values ...interface{}) (tx *DB) {
 	tx.Statement.SQL = strings.Builder{}
 
 	if strings.Contains(sql, "@") {
-		types.NamedExpr{SQL: sql, Vars: values}.Build(tx.Statement)
+		clause.NamedExpr{SQL: sql, Vars: values}.Build(tx.Statement)
 	} else {
-		types.Expr{SQL: sql, Vars: values}.Build(tx.Statement)
+		clause.Expr{SQL: sql, Vars: values}.Build(tx.Statement)
 	}
 	return
 }

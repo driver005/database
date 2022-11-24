@@ -5,12 +5,12 @@ import (
 	"sort"
 
 	"github.com/driver005/database"
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 )
 
 // ConvertMapToValuesForCreate convert map to values
-func ConvertMapToValuesForCreate(stmt *database.Statement, mapValue map[string]interface{}) (values types.Values) {
-	values.Columns = make([]types.Column, 0, len(mapValue))
+func ConvertMapToValuesForCreate(stmt *database.Statement, mapValue map[string]interface{}) (values clause.Values) {
+	values.Columns = make([]clause.Column, 0, len(mapValue))
 	selectColumns, restricted := stmt.SelectAndOmitColumns(true, false)
 
 	keys := make([]string, 0, len(mapValue))
@@ -28,7 +28,7 @@ func ConvertMapToValuesForCreate(stmt *database.Statement, mapValue map[string]i
 		}
 
 		if v, ok := selectColumns[k]; (ok && v) || (!ok && !restricted) {
-			values.Columns = append(values.Columns, types.Column{Name: k})
+			values.Columns = append(values.Columns, clause.Column{Name: k})
 			if len(values.Values) == 0 {
 				values.Values = [][]interface{}{{}}
 			}
@@ -40,7 +40,7 @@ func ConvertMapToValuesForCreate(stmt *database.Statement, mapValue map[string]i
 }
 
 // ConvertSliceOfMapToValuesForCreate convert slice of map to values
-func ConvertSliceOfMapToValuesForCreate(stmt *database.Statement, mapValues []map[string]interface{}) (values types.Values) {
+func ConvertSliceOfMapToValuesForCreate(stmt *database.Statement, mapValues []map[string]interface{}) (values clause.Values) {
 	columns := make([]string, 0, len(mapValues))
 
 	// when the length of mapValues is zero,return directly here
@@ -78,9 +78,9 @@ func ConvertSliceOfMapToValuesForCreate(stmt *database.Statement, mapValues []ma
 
 	sort.Strings(columns)
 	values.Values = make([][]interface{}, len(mapValues))
-	values.Columns = make([]types.Column, len(columns))
+	values.Columns = make([]clause.Column, len(columns))
 	for idx, column := range columns {
-		values.Columns[idx] = types.Column{Name: column}
+		values.Columns[idx] = clause.Column{Name: column}
 
 		for i, v := range result[column] {
 			if len(values.Values[i]) == 0 {
@@ -95,8 +95,8 @@ func ConvertSliceOfMapToValuesForCreate(stmt *database.Statement, mapValues []ma
 
 func hasReturning(tx *database.DB, supportReturning bool) (bool, database.ScanMode) {
 	if supportReturning {
-		if c, ok := tx.Statement.Types["RETURNING"]; ok {
-			returning, _ := c.Expression.(types.Returning)
+		if c, ok := tx.Statement.Clauses["RETURNING"]; ok {
+			returning, _ := c.Expression.(clause.Returning)
 			if len(returning.Columns) == 0 || (len(returning.Columns) == 1 && returning.Columns[0].Name == "*") {
 				return true, 0
 			}
@@ -108,10 +108,10 @@ func hasReturning(tx *database.DB, supportReturning bool) (bool, database.ScanMo
 
 func checkMissingWhereConditions(db *database.DB) {
 	if !db.AllowGlobalUpdate && db.Error == nil {
-		where, withCondition := db.Statement.Types["WHERE"]
+		where, withCondition := db.Statement.Clauses["WHERE"]
 		if withCondition {
-			if _, withSoftDelete := db.Statement.Types["soft_delete_enabled"]; withSoftDelete {
-				whereClause, _ := where.Expression.(types.Where)
+			if _, withSoftDelete := db.Statement.Clauses["soft_delete_enabled"]; withSoftDelete {
+				whereClause, _ := where.Expression.(clause.Where)
 				withCondition = len(whereClause.Exprs) > 1
 			}
 		}

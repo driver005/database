@@ -1,8 +1,6 @@
 package callbacks
 
-import (
-	"github.com/driver005/database"
-)
+import "github.com/driver005/database"
 
 func RowQuery(db *database.DB) {
 	if db.Error == nil {

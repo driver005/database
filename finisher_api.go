@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
-// Create insert the value into database
+// Create inserts value, returning the inserted data's primary key in value's id
 func (db *DB) Create(value interface{}) (tx *DB) {
 	if db.CreateBatchSize > 0 {
 		return db.CreateInBatches(value, db.CreateBatchSize)
@@ -24,7 +24,7 @@ func (db *DB) Create(value interface{}) (tx *DB) {
 	return tx.callbacks.Create().Execute(tx)
 }
 
-// CreateInBatches insert the value in batches into database
+// CreateInBatches inserts value in batches of batchSize
 func (db *DB) CreateInBatches(value interface{}, batchSize int) (tx *DB) {
 	reflectValue := reflect.Indirect(reflect.ValueOf(value))
 
@@ -68,7 +68,7 @@ func (db *DB) CreateInBatches(value interface{}, batchSize int) (tx *DB) {
 	return
 }
 
-// Save update value in database, if the value doesn't have primary key, will insert it
+// Save updates value in database. If value doesn't contain a matching primary key, value is inserted.
 func (db *DB) Save(value interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Dest = value
@@ -80,10 +80,10 @@ func (db *DB) Save(value interface{}) (tx *DB) {
 
 	switch reflectValue.Kind() {
 	case reflect.Slice, reflect.Array:
-		if _, ok := tx.Statement.Types["ON CONFLICT"]; !ok {
-			tx = tx.Types(types.OnConflict{UpdateAll: true})
+		if _, ok := tx.Statement.Clauses["ON CONFLICT"]; !ok {
+			tx = tx.Clauses(clause.OnConflict{UpdateAll: true})
 		}
-		tx = tx.callbacks.Create().Execute(tx.Set("database:update_track_time", true))
+		tx = tx.callbacks.Create().Execute(tx.Set("gorm:update_track_time", true))
 	case reflect.Struct:
 		if err := tx.Statement.Parse(value); err == nil && tx.Statement.Schema != nil {
 			for _, pf := range tx.Statement.Schema.PrimaryFields {
@@ -114,14 +114,14 @@ func (db *DB) Save(value interface{}) (tx *DB) {
 	return
 }
 
-// First find first record that match given conditions, order by primary key
+// First finds the first record ordered by primary key, matching given conditions conds
 func (db *DB) First(dest interface{}, conds ...interface{}) (tx *DB) {
-	tx = db.Limit(1).Order(types.OrderByColumn{
-		Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey},
+	tx = db.Limit(1).Order(clause.OrderByColumn{
+		Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey},
 	})
 	if len(conds) > 0 {
 		if exprs := tx.Statement.BuildCondition(conds[0], conds[1:]...); len(exprs) > 0 {
-			tx.Statement.AddClause(types.Where{Exprs: exprs})
+			tx.Statement.AddClause(clause.Where{Exprs: exprs})
 		}
 	}
 	tx.Statement.RaiseErrorOnNotFound = true
@@ -129,12 +129,12 @@ func (db *DB) First(dest interface{}, conds ...interface{}) (tx *DB) {
 	return tx.callbacks.Query().Execute(tx)
 }
 
-// Take return a record that match given conditions, the order will depend on the database implementation
+// Take finds the first record returned by the database in no specified order, matching given conditions conds
 func (db *DB) Take(dest interface{}, conds ...interface{}) (tx *DB) {
 	tx = db.Limit(1)
 	if len(conds) > 0 {
 		if exprs := tx.Statement.BuildCondition(conds[0], conds[1:]...); len(exprs) > 0 {
-			tx.Statement.AddClause(types.Where{Exprs: exprs})
+			tx.Statement.AddClause(clause.Where{Exprs: exprs})
 		}
 	}
 	tx.Statement.RaiseErrorOnNotFound = true
@@ -142,15 +142,15 @@ func (db *DB) Take(dest interface{}, conds ...interface{}) (tx *DB) {
 	return tx.callbacks.Query().Execute(tx)
 }
 
-// Last find last record that match given conditions, order by primary key
+// Last finds the last record ordered by primary key, matching given conditions conds
 func (db *DB) Last(dest interface{}, conds ...interface{}) (tx *DB) {
-	tx = db.Limit(1).Order(types.OrderByColumn{
-		Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey},
+	tx = db.Limit(1).Order(clause.OrderByColumn{
+		Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey},
 		Desc:   true,
 	})
 	if len(conds) > 0 {
 		if exprs := tx.Statement.BuildCondition(conds[0], conds[1:]...); len(exprs) > 0 {
-			tx.Statement.AddClause(types.Where{Exprs: exprs})
+			tx.Statement.AddClause(clause.Where{Exprs: exprs})
 		}
 	}
 	tx.Statement.RaiseErrorOnNotFound = true
@@ -158,23 +158,23 @@ func (db *DB) Last(dest interface{}, conds ...interface{}) (tx *DB) {
 	return tx.callbacks.Query().Execute(tx)
 }
 
-// Find find records that match given conditions
+// Find finds all records matching given conditions conds
 func (db *DB) Find(dest interface{}, conds ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if len(conds) > 0 {
 		if exprs := tx.Statement.BuildCondition(conds[0], conds[1:]...); len(exprs) > 0 {
-			tx.Statement.AddClause(types.Where{Exprs: exprs})
+			tx.Statement.AddClause(clause.Where{Exprs: exprs})
 		}
 	}
 	tx.Statement.Dest = dest
 	return tx.callbacks.Query().Execute(tx)
 }
 
-// FindInBatches find records in batches
+// FindInBatches finds all records in batches of batchSize
 func (db *DB) FindInBatches(dest interface{}, batchSize int, fc func(tx *DB, batch int) error) *DB {
 	var (
-		tx = db.Order(types.OrderByColumn{
-			Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey},
+		tx = db.Order(clause.OrderByColumn{
+			Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey},
 		}).Session(&Session{})
 		queryDB      = tx
 		rowsAffected int64
@@ -183,9 +183,11 @@ func (db *DB) FindInBatches(dest interface{}, batchSize int, fc func(tx *DB, bat
 
 	// user specified offset or limit
 	var totalSize int
-	if c, ok := tx.Statement.Types["LIMIT"]; ok {
-		if limit, ok := c.Expression.(types.Limit); ok {
-			totalSize = limit.Limit
+	if c, ok := tx.Statement.Clauses["LIMIT"]; ok {
+		if limit, ok := c.Expression.(clause.Limit); ok {
+			if limit.Limit != nil {
+				totalSize = *limit.Limit
+			}
 
 			if totalSize > 0 && batchSize > totalSize {
 				batchSize = totalSize
@@ -202,7 +204,9 @@ func (db *DB) FindInBatches(dest interface{}, batchSize int, fc func(tx *DB, bat
 		batch++
 
 		if result.Error == nil && result.RowsAffected != 0 {
-			tx.AddError(fc(result, batch))
+			fcTx := result.Session(&Session{NewDB: true})
+			fcTx.RowsAffected = result.RowsAffected
+			tx.AddError(fc(fcTx, batch))
 		} else if result.Error != nil {
 			tx.AddError(result.Error)
 		}
@@ -227,8 +231,12 @@ func (db *DB) FindInBatches(dest interface{}, batchSize int, fc func(tx *DB, bat
 			break
 		}
 
-		primaryValue, _ := result.Statement.Schema.PrioritizedPrimaryField.ValueOf(tx.Statement.Context, resultsValue.Index(resultsValue.Len()-1))
-		queryDB = tx.Types(types.Gt{Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey}, Value: primaryValue})
+		primaryValue, zero := result.Statement.Schema.PrioritizedPrimaryField.ValueOf(tx.Statement.Context, resultsValue.Index(resultsValue.Len()-1))
+		if zero {
+			tx.AddError(ErrPrimaryKeyRequired)
+			break
+		}
+		queryDB = tx.Clauses(clause.Gt{Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey}, Value: primaryValue})
 	}
 
 	tx.RowsAffected = rowsAffected
@@ -238,24 +246,24 @@ func (db *DB) FindInBatches(dest interface{}, batchSize int, fc func(tx *DB, bat
 func (db *DB) assignInterfacesToValue(values ...interface{}) {
 	for _, value := range values {
 		switch v := value.(type) {
-		case []types.Expression:
+		case []clause.Expression:
 			for _, expr := range v {
-				if eq, ok := expr.(types.Eq); ok {
+				if eq, ok := expr.(clause.Eq); ok {
 					switch column := eq.Column.(type) {
 					case string:
 						if field := db.Statement.Schema.LookUpField(column); field != nil {
 							db.AddError(field.Set(db.Statement.Context, db.Statement.ReflectValue, eq.Value))
 						}
-					case types.Column:
+					case clause.Column:
 						if field := db.Statement.Schema.LookUpField(column.Name); field != nil {
 							db.AddError(field.Set(db.Statement.Context, db.Statement.ReflectValue, eq.Value))
 						}
 					}
-				} else if andCond, ok := expr.(types.AndConditions); ok {
+				} else if andCond, ok := expr.(clause.AndConditions); ok {
 					db.assignInterfacesToValue(andCond.Exprs)
 				}
 			}
-		case types.Expression, map[string]string, map[interface{}]interface{}, map[string]interface{}:
+		case clause.Expression, map[string]string, map[interface{}]interface{}, map[string]interface{}:
 			if exprs := db.Statement.BuildCondition(value); len(exprs) > 0 {
 				db.assignInterfacesToValue(exprs)
 			}
@@ -284,15 +292,16 @@ func (db *DB) assignInterfacesToValue(values ...interface{}) {
 	}
 }
 
-// FirstOrInit gets the first matched record or initialize a new instance with given conditions (only works with struct or map conditions)
+// FirstOrInit finds the first matching record, otherwise if not found initializes a new instance with given conds.
+// Each conds must be a struct or map.
 func (db *DB) FirstOrInit(dest interface{}, conds ...interface{}) (tx *DB) {
-	queryTx := db.Limit(1).Order(types.OrderByColumn{
-		Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey},
+	queryTx := db.Limit(1).Order(clause.OrderByColumn{
+		Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey},
 	})
 
 	if tx = queryTx.Find(dest, conds...); tx.RowsAffected == 0 {
-		if c, ok := tx.Statement.Types["WHERE"]; ok {
-			if where, ok := c.Expression.(types.Where); ok {
+		if c, ok := tx.Statement.Clauses["WHERE"]; ok {
+			if where, ok := c.Expression.(clause.Where); ok {
 				tx.assignInterfacesToValue(where.Exprs)
 			}
 		}
@@ -310,16 +319,17 @@ func (db *DB) FirstOrInit(dest interface{}, conds ...interface{}) (tx *DB) {
 	return
 }
 
-// FirstOrCreate gets the first matched record or create a new one with given conditions (only works with struct, map conditions)
+// FirstOrCreate finds the first matching record, otherwise if not found creates a new instance with given conds.
+// Each conds must be a struct or map.
 func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) (tx *DB) {
 	tx = db.getInstance()
-	queryTx := db.Session(&Session{}).Limit(1).Order(types.OrderByColumn{
-		Column: types.Column{Table: types.CurrentTable, Name: types.PrimaryKey},
+	queryTx := db.Session(&Session{}).Limit(1).Order(clause.OrderByColumn{
+		Column: clause.Column{Table: clause.CurrentTable, Name: clause.PrimaryKey},
 	})
 	if result := queryTx.Find(dest, conds...); result.Error == nil {
 		if result.RowsAffected == 0 {
-			if c, ok := result.Statement.Types["WHERE"]; ok {
-				if where, ok := c.Expression.(types.Where); ok {
+			if c, ok := result.Statement.Clauses["WHERE"]; ok {
+				if where, ok := c.Expression.(clause.Where); ok {
 					result.assignInterfacesToValue(where.Exprs)
 				}
 			}
@@ -339,11 +349,11 @@ func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) (tx *DB) {
 			exprs := tx.Statement.BuildCondition(db.Statement.assigns[0], db.Statement.assigns[1:]...)
 			assigns := map[string]interface{}{}
 			for _, expr := range exprs {
-				if eq, ok := expr.(types.Eq); ok {
+				if eq, ok := expr.(clause.Eq); ok {
 					switch column := eq.Column.(type) {
 					case string:
 						assigns[column] = eq.Value
-					case types.Column:
+					case clause.Column:
 						assigns[column.Name] = eq.Value
 					default:
 					}
@@ -351,21 +361,21 @@ func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) (tx *DB) {
 			}
 
 			return tx.Model(dest).Updates(assigns)
-		} else {
-			tx.Error = result.Error
 		}
+	} else {
+		tx.Error = result.Error
 	}
 	return tx
 }
 
-// Update update attributes with callbacks, refer: https://database.io/docs/update.html#Update-Changed-Fields
+// Update updates column with value using callbacks. Reference: https://gorm.io/docs/update.html#Update-Changed-Fields
 func (db *DB) Update(column string, value interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Dest = map[string]interface{}{column: value}
 	return tx.callbacks.Update().Execute(tx)
 }
 
-// Updates update attributes with callbacks, refer: https://database.io/docs/update.html#Update-Changed-Fields
+// Updates updates attributes using callbacks. values must be a struct or map. Reference: https://gorm.io/docs/update.html#Update-Changed-Fields
 func (db *DB) Updates(values interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.Dest = values
@@ -386,12 +396,14 @@ func (db *DB) UpdateColumns(values interface{}) (tx *DB) {
 	return tx.callbacks.Update().Execute(tx)
 }
 
-// Delete delete value match given conditions, if the value has primary key, then will including the primary key as condition
+// Delete deletes value matching given conditions. If value contains primary key it is included in the conditions. If
+// value includes a deleted_at field, then Delete performs a soft delete instead by setting deleted_at with the current
+// time if null.
 func (db *DB) Delete(value interface{}, conds ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if len(conds) > 0 {
 		if exprs := tx.Statement.BuildCondition(conds[0], conds[1:]...); len(exprs) > 0 {
-			tx.Statement.AddClause(types.Where{Exprs: exprs})
+			tx.Statement.AddClause(clause.Where{Exprs: exprs})
 		}
 	}
 	tx.Statement.Dest = value
@@ -407,18 +419,18 @@ func (db *DB) Count(count *int64) (tx *DB) {
 		}()
 	}
 
-	if selectClause, ok := db.Statement.Types["SELECT"]; ok {
+	if selectClause, ok := db.Statement.Clauses["SELECT"]; ok {
 		defer func() {
-			tx.Statement.Types["SELECT"] = selectClause
+			tx.Statement.Clauses["SELECT"] = selectClause
 		}()
 	} else {
-		defer delete(tx.Statement.Types, "SELECT")
+		defer delete(tx.Statement.Clauses, "SELECT")
 	}
 
 	if len(tx.Statement.Selects) == 0 {
-		tx.Statement.AddClause(types.Select{Expression: types.Expr{SQL: "count(*)"}})
+		tx.Statement.AddClause(clause.Select{Expression: clause.Expr{SQL: "count(*)"}})
 	} else if !strings.HasPrefix(strings.TrimSpace(strings.ToLower(tx.Statement.Selects[0])), "count(") {
-		expr := types.Expr{SQL: "count(*)"}
+		expr := clause.Expr{SQL: "count(*)"}
 
 		if len(tx.Statement.Selects) == 1 {
 			dbName := tx.Statement.Selects[0]
@@ -431,21 +443,21 @@ func (db *DB) Count(count *int64) (tx *DB) {
 				}
 
 				if tx.Statement.Distinct {
-					expr = types.Expr{SQL: "COUNT(DISTINCT(?))", Vars: []interface{}{types.Column{Name: dbName}}}
+					expr = clause.Expr{SQL: "COUNT(DISTINCT(?))", Vars: []interface{}{clause.Column{Name: dbName}}}
 				} else if dbName != "*" {
-					expr = types.Expr{SQL: "COUNT(?)", Vars: []interface{}{types.Column{Name: dbName}}}
+					expr = clause.Expr{SQL: "COUNT(?)", Vars: []interface{}{clause.Column{Name: dbName}}}
 				}
 			}
 		}
 
-		tx.Statement.AddClause(types.Select{Expression: expr})
+		tx.Statement.AddClause(clause.Select{Expression: expr})
 	}
 
-	if orderByClause, ok := db.Statement.Types["ORDER BY"]; ok {
-		if _, ok := db.Statement.Types["GROUP BY"]; !ok {
-			delete(tx.Statement.Types, "ORDER BY")
+	if orderByClause, ok := db.Statement.Clauses["ORDER BY"]; ok {
+		if _, ok := db.Statement.Clauses["GROUP BY"]; !ok {
+			delete(tx.Statement.Clauses, "ORDER BY")
 			defer func() {
-				tx.Statement.Types["ORDER BY"] = orderByClause
+				tx.Statement.Clauses["ORDER BY"] = orderByClause
 			}()
 		}
 	}
@@ -453,7 +465,7 @@ func (db *DB) Count(count *int64) (tx *DB) {
 	tx.Statement.Dest = count
 	tx = tx.callbacks.Query().Execute(tx)
 
-	if _, ok := db.Statement.Types["GROUP BY"]; ok || tx.RowsAffected != 1 {
+	if tx.RowsAffected != 1 {
 		*count = tx.RowsAffected
 	}
 
@@ -480,7 +492,7 @@ func (db *DB) Rows() (*sql.Rows, error) {
 	return rows, tx.Error
 }
 
-// Scan scan value to a struct
+// Scan scans selected value to the struct dest
 func (db *DB) Scan(dest interface{}) (tx *DB) {
 	config := *db.Config
 	currentLogger, newLogger := config.Logger, logger.Recorder.New()
@@ -505,9 +517,10 @@ func (db *DB) Scan(dest interface{}) (tx *DB) {
 	return
 }
 
-// Pluck used to query single column from a model as a map
-//     var ages []int64
-//     db.Model(&users).Pluck("age", &ages)
+// Pluck queries a single column from a model, returning in the slice dest. E.g.:
+//
+//	var ages []int64
+//	db.Model(&users).Pluck("age", &ages)
 func (db *DB) Pluck(column string, dest interface{}) (tx *DB) {
 	tx = db.getInstance()
 	if tx.Statement.Model != nil {
@@ -520,9 +533,9 @@ func (db *DB) Pluck(column string, dest interface{}) (tx *DB) {
 
 	if len(tx.Statement.Selects) != 1 {
 		fields := strings.FieldsFunc(column, utils.IsValidDBNameChar)
-		tx.Statement.AddClauseIfNotExists(types.Select{
+		tx.Statement.AddClauseIfNotExists(clause.Select{
 			Distinct: tx.Statement.Distinct,
-			Columns:  []types.Column{{Name: column, Raw: len(fields) != 1}},
+			Columns:  []clause.Column{{Name: column, Raw: len(fields) != 1}},
 		})
 	}
 	tx.Statement.Dest = dest
@@ -548,7 +561,8 @@ func (db *DB) ScanRows(rows *sql.Rows, dest interface{}) error {
 	return tx.Error
 }
 
-// Connection  use a db conn to execute Multiple commands,this conn will put conn pool after it is executed.
+// Connection uses a db connection to execute an arbitrary number of commands in fc. When finished, the connection is
+// returned to the connection pool.
 func (db *DB) Connection(fc func(tx *DB) error) (err error) {
 	if db.Error != nil {
 		return db.Error
@@ -570,7 +584,9 @@ func (db *DB) Connection(fc func(tx *DB) error) (err error) {
 	return fc(tx)
 }
 
-// Transaction start a transaction as a block, return error will rollback, otherwise to commit.
+// Transaction start a transaction as a block, return error will rollback, otherwise to commit. Transaction executes an
+// arbitrary number of commands in fc within a transaction. On success the changes are committed; if an error occurs
+// they are rolled back.
 func (db *DB) Transaction(fc func(tx *DB) error, opts ...*sql.TxOptions) (err error) {
 	panicked := true
 
@@ -613,7 +629,7 @@ func (db *DB) Transaction(fc func(tx *DB) error, opts ...*sql.TxOptions) (err er
 	return
 }
 
-// Begin begins a transaction
+// Begin begins a transaction with any transaction options opts
 func (db *DB) Begin(opts ...*sql.TxOptions) *DB {
 	var (
 		// clone statement
@@ -642,7 +658,7 @@ func (db *DB) Begin(opts ...*sql.TxOptions) *DB {
 	return tx
 }
 
-// Commit commit a transaction
+// Commit commits the changes in a transaction
 func (db *DB) Commit() *DB {
 	if committer, ok := db.Statement.ConnPool.(TxCommitter); ok && committer != nil && !reflect.ValueOf(committer).IsNil() {
 		db.AddError(committer.Commit())
@@ -652,7 +668,7 @@ func (db *DB) Commit() *DB {
 	return db
 }
 
-// Rollback rollback a transaction
+// Rollback rollbacks the changes in a transaction
 func (db *DB) Rollback() *DB {
 	if committer, ok := db.Statement.ConnPool.(TxCommitter); ok && committer != nil {
 		if !reflect.ValueOf(committer).IsNil() {
@@ -682,15 +698,15 @@ func (db *DB) RollbackTo(name string) *DB {
 	return db
 }
 
-// Exec execute raw sql
+// Exec executes raw sql
 func (db *DB) Exec(sql string, values ...interface{}) (tx *DB) {
 	tx = db.getInstance()
 	tx.Statement.SQL = strings.Builder{}
 
 	if strings.Contains(sql, "@") {
-		types.NamedExpr{SQL: sql, Vars: values}.Build(tx.Statement)
+		clause.NamedExpr{SQL: sql, Vars: values}.Build(tx.Statement)
 	} else {
-		types.Expr{SQL: sql, Vars: values}.Build(tx.Statement)
+		clause.Expr{SQL: sql, Vars: values}.Build(tx.Statement)
 	}
 
 	return tx.callbacks.Raw().Execute(tx)

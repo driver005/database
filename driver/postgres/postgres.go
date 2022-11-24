@@ -8,10 +8,10 @@ import (
 
 	"github.com/driver005/database"
 	"github.com/driver005/database/callbacks"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/migrator"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/stdlib"
 )
@@ -81,16 +81,16 @@ func (dialector Dialector) Migrator(db *database.DB) database.Migrator {
 	}}}
 }
 
-func (dialector Dialector) DefaultValueOf(field *schema.Field) types.Expression {
-	return types.Expr{SQL: "DEFAULT"}
+func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
+	return clause.Expr{SQL: "DEFAULT"}
 }
 
-func (dialector Dialector) BindVarTo(writer types.Writer, stmt *database.Statement, v interface{}) {
+func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *database.Statement, v interface{}) {
 	writer.WriteByte('$')
 	writer.WriteString(strconv.Itoa(len(stmt.Vars)))
 }
 
-func (dialector Dialector) QuoteTo(writer types.Writer, str string) {
+func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	var (
 		underQuoted, selfQuoted bool
 		continuousBacktick      int8

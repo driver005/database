@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 	"github.com/jinzhu/inflection"
 )
 
@@ -123,16 +123,17 @@ func (schema *Schema) parseRelation(field *Field) *Relationship {
 }
 
 // User has many Toys, its `Polymorphic` is `Owner`, Pet has one Toy, its `Polymorphic` is `Owner`
-//     type User struct {
-//       Toys []Toy `database:"polymorphic:Owner;"`
-//     }
-//     type Pet struct {
-//       Toy Toy `database:"polymorphic:Owner;"`
-//     }
-//     type Toy struct {
-//       OwnerID   int
-//       OwnerType string
-//     }
+//
+//	type User struct {
+//	  Toys []Toy `database:"polymorphic:Owner;"`
+//	}
+//	type Pet struct {
+//	  Toy Toy `database:"polymorphic:Owner;"`
+//	}
+//	type Toy struct {
+//	  OwnerID   int
+//	  OwnerType string
+//	}
 func (schema *Schema) buildPolymorphicRelation(relation *Relationship, field *Field, polymorphic string) {
 	relation.Polymorphic = &Polymorphic{
 		Value:           schema.Table,
@@ -583,7 +584,7 @@ func (rel *Relationship) ParseConstraint() *Constraint {
 	return &constraint
 }
 
-func (rel *Relationship) ToQueryConditions(ctx context.Context, reflectValue reflect.Value) (conds []types.Expression) {
+func (rel *Relationship) ToQueryConditions(ctx context.Context, reflectValue reflect.Value) (conds []clause.Expression) {
 	table := rel.FieldSchema.Table
 	foreignFields := []*Field{}
 	relForeignKeys := []string{}
@@ -595,14 +596,14 @@ func (rel *Relationship) ToQueryConditions(ctx context.Context, reflectValue ref
 				foreignFields = append(foreignFields, ref.PrimaryKey)
 				relForeignKeys = append(relForeignKeys, ref.ForeignKey.DBName)
 			} else if ref.PrimaryValue != "" {
-				conds = append(conds, types.Eq{
-					Column: types.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
+				conds = append(conds, clause.Eq{
+					Column: clause.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
 					Value:  ref.PrimaryValue,
 				})
 			} else {
-				conds = append(conds, types.Eq{
-					Column: types.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
-					Value:  types.Column{Table: rel.FieldSchema.Table, Name: ref.PrimaryKey.DBName},
+				conds = append(conds, clause.Eq{
+					Column: clause.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
+					Value:  clause.Column{Table: rel.FieldSchema.Table, Name: ref.PrimaryKey.DBName},
 				})
 			}
 		}
@@ -612,8 +613,8 @@ func (rel *Relationship) ToQueryConditions(ctx context.Context, reflectValue ref
 				relForeignKeys = append(relForeignKeys, ref.ForeignKey.DBName)
 				foreignFields = append(foreignFields, ref.PrimaryKey)
 			} else if ref.PrimaryValue != "" {
-				conds = append(conds, types.Eq{
-					Column: types.Column{Table: rel.FieldSchema.Table, Name: ref.ForeignKey.DBName},
+				conds = append(conds, clause.Eq{
+					Column: clause.Column{Table: rel.FieldSchema.Table, Name: ref.ForeignKey.DBName},
 					Value:  ref.PrimaryValue,
 				})
 			} else {
@@ -626,7 +627,7 @@ func (rel *Relationship) ToQueryConditions(ctx context.Context, reflectValue ref
 	_, foreignValues := GetIdentityFieldValuesMap(ctx, reflectValue, foreignFields)
 	column, values := ToQueryValues(table, relForeignKeys, foreignValues)
 
-	conds = append(conds, types.IN{Column: column, Values: values})
+	conds = append(conds, clause.IN{Column: column, Values: values})
 	return
 }
 

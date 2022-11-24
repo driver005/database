@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -103,7 +103,7 @@ func (association *Association) Replace(values ...interface{}) error {
 
 			if _, rvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, relValues, rel.FieldSchema.PrimaryFields); len(rvs) > 0 {
 				if column, values := schema.ToQueryValues(rel.FieldSchema.Table, rel.FieldSchema.PrimaryFieldDBNames, rvs); len(values) > 0 {
-					tx.Not(types.IN{Column: column, Values: values})
+					tx.Not(clause.IN{Column: column, Values: values})
 				}
 			}
 
@@ -113,13 +113,13 @@ func (association *Association) Replace(values ...interface{}) error {
 					foreignKeys = append(foreignKeys, ref.ForeignKey.DBName)
 					updateMap[ref.ForeignKey.DBName] = nil
 				} else if ref.PrimaryValue != "" {
-					tx.Where(types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+					tx.Where(clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 				}
 			}
 
 			if _, pvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, reflectValue, primaryFields); len(pvs) > 0 {
 				column, values := schema.ToQueryValues(rel.FieldSchema.Table, foreignKeys, pvs)
-				association.Error = tx.Where(types.IN{Column: column, Values: values}).UpdateColumns(updateMap).Error
+				association.Error = tx.Where(clause.IN{Column: column, Values: values}).UpdateColumns(updateMap).Error
 			}
 		case schema.Many2Many:
 			var (
@@ -139,20 +139,20 @@ func (association *Association) Replace(values ...interface{}) error {
 						joinRelPrimaryKeys = append(joinRelPrimaryKeys, ref.ForeignKey.DBName)
 					}
 				} else {
-					tx.Types(types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+					tx.Clauses(clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 				}
 			}
 
 			_, pvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, reflectValue, primaryFields)
 			if column, values := schema.ToQueryValues(rel.JoinTable.Table, joinPrimaryKeys, pvs); len(values) > 0 {
-				tx.Where(types.IN{Column: column, Values: values})
+				tx.Where(clause.IN{Column: column, Values: values})
 			} else {
 				return ErrPrimaryKeyRequired
 			}
 
 			_, rvs := schema.GetIdentityFieldValuesMapFromValues(association.DB.Statement.Context, values, relPrimaryFields)
 			if relColumn, relValues := schema.ToQueryValues(rel.JoinTable.Table, joinRelPrimaryKeys, rvs); len(relValues) > 0 {
-				tx.Where(types.Not(types.IN{Column: relColumn, Values: relValues}))
+				tx.Where(clause.Not(clause.IN{Column: relColumn, Values: relValues}))
 			}
 
 			association.Error = tx.Delete(modelValue).Error
@@ -169,7 +169,7 @@ func (association *Association) Delete(values ...interface{}) error {
 			primaryFields []*schema.Field
 			foreignKeys   []string
 			updateAttrs   = map[string]interface{}{}
-			conds         []types.Expression
+			conds         []clause.Expression
 		)
 
 		for _, ref := range rel.References {
@@ -178,7 +178,7 @@ func (association *Association) Delete(values ...interface{}) error {
 				foreignKeys = append(foreignKeys, ref.ForeignKey.DBName)
 				updateAttrs[ref.ForeignKey.DBName] = nil
 			} else {
-				conds = append(conds, types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+				conds = append(conds, clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 			}
 		}
 
@@ -188,31 +188,31 @@ func (association *Association) Delete(values ...interface{}) error {
 
 			_, pvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, reflectValue, rel.Schema.PrimaryFields)
 			if pcolumn, pvalues := schema.ToQueryValues(rel.Schema.Table, rel.Schema.PrimaryFieldDBNames, pvs); len(pvalues) > 0 {
-				conds = append(conds, types.IN{Column: pcolumn, Values: pvalues})
+				conds = append(conds, clause.IN{Column: pcolumn, Values: pvalues})
 			} else {
 				return ErrPrimaryKeyRequired
 			}
 
 			_, rvs := schema.GetIdentityFieldValuesMapFromValues(association.DB.Statement.Context, values, primaryFields)
 			relColumn, relValues := schema.ToQueryValues(rel.Schema.Table, foreignKeys, rvs)
-			conds = append(conds, types.IN{Column: relColumn, Values: relValues})
+			conds = append(conds, clause.IN{Column: relColumn, Values: relValues})
 
-			association.Error = tx.Types(conds...).UpdateColumns(updateAttrs).Error
+			association.Error = tx.Clauses(conds...).UpdateColumns(updateAttrs).Error
 		case schema.HasOne, schema.HasMany:
 			tx := association.DB.Model(reflect.New(rel.FieldSchema.ModelType).Interface())
 
 			_, pvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, reflectValue, primaryFields)
 			if pcolumn, pvalues := schema.ToQueryValues(rel.FieldSchema.Table, foreignKeys, pvs); len(pvalues) > 0 {
-				conds = append(conds, types.IN{Column: pcolumn, Values: pvalues})
+				conds = append(conds, clause.IN{Column: pcolumn, Values: pvalues})
 			} else {
 				return ErrPrimaryKeyRequired
 			}
 
 			_, rvs := schema.GetIdentityFieldValuesMapFromValues(association.DB.Statement.Context, values, rel.FieldSchema.PrimaryFields)
 			relColumn, relValues := schema.ToQueryValues(rel.FieldSchema.Table, rel.FieldSchema.PrimaryFieldDBNames, rvs)
-			conds = append(conds, types.IN{Column: relColumn, Values: relValues})
+			conds = append(conds, clause.IN{Column: relColumn, Values: relValues})
 
-			association.Error = tx.Types(conds...).UpdateColumns(updateAttrs).Error
+			association.Error = tx.Clauses(conds...).UpdateColumns(updateAttrs).Error
 		case schema.Many2Many:
 			var (
 				primaryFields, relPrimaryFields     []*schema.Field
@@ -230,22 +230,22 @@ func (association *Association) Delete(values ...interface{}) error {
 						joinRelPrimaryKeys = append(joinRelPrimaryKeys, ref.ForeignKey.DBName)
 					}
 				} else {
-					conds = append(conds, types.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
+					conds = append(conds, clause.Eq{Column: ref.ForeignKey.DBName, Value: ref.PrimaryValue})
 				}
 			}
 
 			_, pvs := schema.GetIdentityFieldValuesMap(association.DB.Statement.Context, reflectValue, primaryFields)
 			if pcolumn, pvalues := schema.ToQueryValues(rel.JoinTable.Table, joinPrimaryKeys, pvs); len(pvalues) > 0 {
-				conds = append(conds, types.IN{Column: pcolumn, Values: pvalues})
+				conds = append(conds, clause.IN{Column: pcolumn, Values: pvalues})
 			} else {
 				return ErrPrimaryKeyRequired
 			}
 
 			_, rvs := schema.GetIdentityFieldValuesMapFromValues(association.DB.Statement.Context, values, relPrimaryFields)
 			relColumn, relValues := schema.ToQueryValues(rel.JoinTable.Table, joinRelPrimaryKeys, rvs)
-			conds = append(conds, types.IN{Column: relColumn, Values: relValues})
+			conds = append(conds, clause.IN{Column: relColumn, Values: relValues})
 
-			association.Error = association.DB.Where(types.Where{Exprs: conds}).Model(nil).Delete(joinValue).Error
+			association.Error = association.DB.Where(clause.Where{Exprs: conds}).Model(nil).Delete(joinValue).Error
 		}
 
 		if association.Error == nil {
@@ -396,7 +396,7 @@ func (association *Association) saveAssociation(clear bool, values ...interface{
 			if columnName = strings.TrimPrefix(name, association.Relationship.Name); columnName == ".*" {
 				columnName = name
 			}
-		} else if strings.HasPrefix(name, types.Associations) {
+		} else if strings.HasPrefix(name, clause.Associations) {
 			columnName = name
 		}
 
@@ -502,20 +502,22 @@ func (association *Association) buildCondition() *DB {
 
 	if association.Relationship.JoinTable != nil {
 		if !tx.Statement.Unscoped && len(association.Relationship.JoinTable.QueryClauses) > 0 {
-			joinStmt := Statement{DB: tx, Context: tx.Statement.Context, Schema: association.Relationship.JoinTable, Table: association.Relationship.JoinTable.Table, Types: map[string]types.Type{}}
+			joinStmt := Statement{DB: tx, Context: tx.Statement.Context, Schema: association.Relationship.JoinTable, Table: association.Relationship.JoinTable.Table, Clauses: map[string]clause.Clause{}}
 			for _, queryClause := range association.Relationship.JoinTable.QueryClauses {
 				joinStmt.AddClause(queryClause)
 			}
 			joinStmt.Build("WHERE")
-			tx.Types(types.Expr{SQL: strings.Replace(joinStmt.SQL.String(), "WHERE ", "", 1), Vars: joinStmt.Vars})
+			if len(joinStmt.SQL.String()) > 0 {
+				tx.Clauses(clause.Expr{SQL: strings.Replace(joinStmt.SQL.String(), "WHERE ", "", 1), Vars: joinStmt.Vars})
+			}
 		}
 
-		tx = tx.Session(&Session{QueryFields: true}).Types(types.From{Joins: []types.Join{{
-			Table: types.Table{Name: association.Relationship.JoinTable.Table},
-			ON:    types.Where{Exprs: queryConds},
+		tx = tx.Session(&Session{QueryFields: true}).Clauses(clause.From{Joins: []clause.Join{{
+			Table: clause.Table{Name: association.Relationship.JoinTable.Table},
+			ON:    clause.Where{Exprs: queryConds},
 		}}})
 	} else {
-		tx.Types(types.Where{Exprs: queryConds})
+		tx.Clauses(clause.Where{Exprs: queryConds})
 	}
 
 	return tx

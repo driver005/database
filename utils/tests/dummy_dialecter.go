@@ -2,9 +2,9 @@ package tests
 
 import (
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 type DummyDialector struct{}
@@ -17,19 +17,19 @@ func (DummyDialector) Initialize(*database.DB) error {
 	return nil
 }
 
-func (DummyDialector) DefaultValueOf(field *schema.Field) types.Expression {
-	return types.Expr{SQL: "DEFAULT"}
+func (DummyDialector) DefaultValueOf(field *schema.Field) clause.Expression {
+	return clause.Expr{SQL: "DEFAULT"}
 }
 
 func (DummyDialector) Migrator(*database.DB) database.Migrator {
 	return nil
 }
 
-func (DummyDialector) BindVarTo(writer types.Writer, stmt *database.Statement, v interface{}) {
+func (DummyDialector) BindVarTo(writer clause.Writer, stmt *database.Statement, v interface{}) {
 	writer.WriteByte('?')
 }
 
-func (DummyDialector) QuoteTo(writer types.Writer, str string) {
+func (DummyDialector) QuoteTo(writer clause.Writer, str string) {
 	var (
 		underQuoted, selfQuoted bool
 		continuousBacktick      int8

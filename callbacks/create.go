@@ -5,8 +5,8 @@ import (
 	"reflect"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -49,19 +49,19 @@ func Create(config *Config) func(db *database.DB) {
 			}
 
 			if supportReturning && len(db.Statement.Schema.FieldsWithDefaultDBValue) > 0 {
-				if _, ok := db.Statement.Types["RETURNING"]; !ok {
-					fromColumns := make([]types.Column, 0, len(db.Statement.Schema.FieldsWithDefaultDBValue))
+				if _, ok := db.Statement.Clauses["RETURNING"]; !ok {
+					fromColumns := make([]clause.Column, 0, len(db.Statement.Schema.FieldsWithDefaultDBValue))
 					for _, field := range db.Statement.Schema.FieldsWithDefaultDBValue {
-						fromColumns = append(fromColumns, types.Column{Name: field.DBName})
+						fromColumns = append(fromColumns, clause.Column{Name: field.DBName})
 					}
-					db.Statement.AddClause(types.Returning{Columns: fromColumns})
+					db.Statement.AddClause(clause.Returning{Columns: fromColumns})
 				}
 			}
 		}
 
 		if db.Statement.SQL.Len() == 0 {
 			db.Statement.SQL.Grow(180)
-			db.Statement.AddClauseIfNotExists(types.Insert{})
+			db.Statement.AddClauseIfNotExists(clause.Insert{})
 			db.Statement.AddClause(ConvertToCreateValues(db.Statement))
 
 			db.Statement.Build(db.Statement.BuildClauses...)
@@ -74,8 +74,8 @@ func Create(config *Config) func(db *database.DB) {
 
 		ok, mode := hasReturning(db, supportReturning)
 		if ok {
-			if c, ok := db.Statement.Types["ON CONFLICT"]; ok {
-				if onConflict, _ := c.Expression.(types.OnConflict); onConflict.DoNothing {
+			if c, ok := db.Statement.Clauses["ON CONFLICT"]; ok {
+				if onConflict, _ := c.Expression.(clause.OnConflict); onConflict.DoNothing {
 					mode |= database.ScanOnConflictDoNothing
 				}
 			}
@@ -173,7 +173,7 @@ func AfterCreate(db *database.DB) {
 }
 
 // ConvertToCreateValues convert to create values
-func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
+func ConvertToCreateValues(stmt *database.Statement) (values clause.Values) {
 	curTime := stmt.DB.NowFunc()
 
 	switch value := stmt.Dest.(type) {
@@ -193,12 +193,12 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 		)
 		stmt.Settings.Delete("database:update_track_time")
 
-		values = types.Values{Columns: make([]types.Column, 0, len(stmt.Schema.DBNames))}
+		values = clause.Values{Columns: make([]clause.Column, 0, len(stmt.Schema.DBNames))}
 
 		for _, db := range stmt.Schema.DBNames {
 			if field := stmt.Schema.FieldsByDBName[db]; !field.HasDefaultValue || field.DefaultValueInterface != nil {
 				if v, ok := selectColumns[db]; (ok && v) || (!ok && (!restricted || field.AutoCreateTime > 0 || field.AutoUpdateTime > 0)) {
-					values.Columns = append(values.Columns, types.Column{Name: db})
+					values.Columns = append(values.Columns, clause.Column{Name: db})
 				}
 			}
 		}
@@ -253,7 +253,7 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 			}
 
 			for field, vs := range defaultValueFieldsHavingValue {
-				values.Columns = append(values.Columns, types.Column{Name: field.DBName})
+				values.Columns = append(values.Columns, clause.Column{Name: field.DBName})
 				for idx := range values.Values {
 					if vs[idx] == nil {
 						values.Values[idx] = append(values.Values[idx], stmt.Dialector.DefaultValueOf(field))
@@ -283,7 +283,7 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 			for _, field := range stmt.Schema.FieldsWithDefaultDBValue {
 				if v, ok := selectColumns[field.DBName]; (ok && v) || (!ok && !restricted) {
 					if rvOfvalue, isZero := field.ValueOf(stmt.Context, stmt.ReflectValue); !isZero {
-						values.Columns = append(values.Columns, types.Column{Name: field.DBName})
+						values.Columns = append(values.Columns, clause.Column{Name: field.DBName})
 						values.Values[0] = append(values.Values[0], rvOfvalue)
 					}
 				}
@@ -293,8 +293,8 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 		}
 	}
 
-	if c, ok := stmt.Types["ON CONFLICT"]; ok {
-		if onConflict, _ := c.Expression.(types.OnConflict); onConflict.UpdateAll {
+	if c, ok := stmt.Clauses["ON CONFLICT"]; ok {
+		if onConflict, _ := c.Expression.(clause.OnConflict); onConflict.UpdateAll {
 			if stmt.Schema != nil && len(values.Columns) >= 1 {
 				selectColumns, restricted := stmt.SelectAndOmitColumns(true, true)
 
@@ -304,7 +304,7 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 						if v, ok := selectColumns[field.DBName]; (ok && v) || (!ok && !restricted) {
 							if !field.PrimaryKey && (!field.HasDefaultValue || field.DefaultValueInterface != nil) && field.AutoCreateTime == 0 {
 								if field.AutoUpdateTime > 0 {
-									assignment := types.Assignment{Column: types.Column{Name: field.DBName}, Value: curTime}
+									assignment := clause.Assignment{Column: clause.Column{Name: field.DBName}, Value: curTime}
 									switch field.AutoUpdateTime {
 									case schema.UnixNanosecond:
 										assignment.Value = curTime.UnixNano()
@@ -323,7 +323,7 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 					}
 				}
 
-				onConflict.DoUpdates = append(onConflict.DoUpdates, types.AssignmentColumns(columns)...)
+				onConflict.DoUpdates = append(onConflict.DoUpdates, clause.AssignmentColumns(columns)...)
 				if len(onConflict.DoUpdates) == 0 {
 					onConflict.DoNothing = true
 				}
@@ -331,7 +331,7 @@ func ConvertToCreateValues(stmt *database.Statement) (values types.Values) {
 				// use primary fields as default OnConflict columns
 				if len(onConflict.Columns) == 0 {
 					for _, field := range stmt.Schema.PrimaryFields {
-						onConflict.Columns = append(onConflict.Columns, types.Column{Name: field.DBName})
+						onConflict.Columns = append(onConflict.Columns, clause.Column{Name: field.DBName})
 					}
 				}
 				stmt.AddClause(onConflict)

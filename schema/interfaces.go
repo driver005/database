@@ -1,7 +1,7 @@
 package schema
 
 import (
-	"github.com/driver005/database/types"
+	"github.com/driver005/database/clause"
 )
 
 // DBDataTypeInterface database data type interface
@@ -17,20 +17,20 @@ type FieldNewValuePool interface {
 
 // CreateClausesInterface create clauses interface
 type CreateClausesInterface interface {
-	CreateClauses(*Field) []types.Interface
+	CreateClauses(*Field) []clause.Interface
 }
 
 // QueryClausesInterface query clauses interface
 type QueryClausesInterface interface {
-	QueryClauses(*Field) []types.Interface
+	QueryClauses(*Field) []clause.Interface
 }
 
 // UpdateClausesInterface update clauses interface
 type UpdateClausesInterface interface {
-	UpdateClauses(*Field) []types.Interface
+	UpdateClauses(*Field) []clause.Interface
 }
 
 // DeleteClausesInterface delete clauses interface
 type DeleteClausesInterface interface {
-	DeleteClauses(*Field) []types.Interface
+	DeleteClauses(*Field) []clause.Interface
 }

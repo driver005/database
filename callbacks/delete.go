@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/driver005/database"
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 	"github.com/driver005/database/utils"
 )
 
@@ -53,7 +53,7 @@ func DeleteBeforeAssociations(db *database.DB) {
 				if len(db.Statement.Selects) > 0 {
 					selects := make([]string, 0, len(db.Statement.Selects))
 					for _, s := range db.Statement.Selects {
-						if s == types.Associations {
+						if s == clause.Associations {
 							selects = append(selects, s)
 						} else if columnPrefix := column + "."; strings.HasPrefix(s, columnPrefix) {
 							selects = append(selects, strings.TrimPrefix(s, columnPrefix))
@@ -66,18 +66,18 @@ func DeleteBeforeAssociations(db *database.DB) {
 				}
 
 				for _, cond := range queryConds {
-					if c, ok := cond.(types.IN); ok && len(c.Values) == 0 {
+					if c, ok := cond.(clause.IN); ok && len(c.Values) == 0 {
 						withoutConditions = true
 						break
 					}
 				}
 
-				if !withoutConditions && db.AddError(tx.Types(types.Where{Exprs: queryConds}).Delete(modelValue).Error) != nil {
+				if !withoutConditions && db.AddError(tx.Clauses(clause.Where{Exprs: queryConds}).Delete(modelValue).Error) != nil {
 					return
 				}
 			case schema.Many2Many:
 				var (
-					queryConds     = make([]types.Expression, 0, len(rel.References))
+					queryConds     = make([]clause.Expression, 0, len(rel.References))
 					foreignFields  = make([]*schema.Field, 0, len(rel.References))
 					relForeignKeys = make([]string, 0, len(rel.References))
 					modelValue     = reflect.New(rel.JoinTable.ModelType).Interface()
@@ -90,8 +90,8 @@ func DeleteBeforeAssociations(db *database.DB) {
 						foreignFields = append(foreignFields, ref.PrimaryKey)
 						relForeignKeys = append(relForeignKeys, ref.ForeignKey.DBName)
 					} else if ref.PrimaryValue != "" {
-						queryConds = append(queryConds, types.Eq{
-							Column: types.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
+						queryConds = append(queryConds, clause.Eq{
+							Column: clause.Column{Table: rel.JoinTable.Table, Name: ref.ForeignKey.DBName},
 							Value:  ref.PrimaryValue,
 						})
 					}
@@ -99,9 +99,9 @@ func DeleteBeforeAssociations(db *database.DB) {
 
 				_, foreignValues := schema.GetIdentityFieldValuesMap(db.Statement.Context, db.Statement.ReflectValue, foreignFields)
 				column, values := schema.ToQueryValues(table, relForeignKeys, foreignValues)
-				queryConds = append(queryConds, types.IN{Column: column, Values: values})
+				queryConds = append(queryConds, clause.IN{Column: column, Values: values})
 
-				if db.AddError(tx.Types(types.Where{Exprs: queryConds}).Delete(modelValue).Error) != nil {
+				if db.AddError(tx.Clauses(clause.Where{Exprs: queryConds}).Delete(modelValue).Error) != nil {
 					return
 				}
 			}
@@ -126,14 +126,14 @@ func Delete(config *Config) func(db *database.DB) {
 
 		if db.Statement.SQL.Len() == 0 {
 			db.Statement.SQL.Grow(100)
-			db.Statement.AddClauseIfNotExists(types.Delete{})
+			db.Statement.AddClauseIfNotExists(clause.Delete{})
 
 			if db.Statement.Schema != nil {
 				_, queryValues := schema.GetIdentityFieldValuesMap(db.Statement.Context, db.Statement.ReflectValue, db.Statement.Schema.PrimaryFields)
 				column, values := schema.ToQueryValues(db.Statement.Table, db.Statement.Schema.PrimaryFieldDBNames, queryValues)
 
 				if len(values) > 0 {
-					db.Statement.AddClause(types.Where{Exprs: []types.Expression{types.IN{Column: column, Values: values}}})
+					db.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.IN{Column: column, Values: values}}})
 				}
 
 				if db.Statement.ReflectValue.CanAddr() && db.Statement.Dest != db.Statement.Model && db.Statement.Model != nil {
@@ -141,12 +141,12 @@ func Delete(config *Config) func(db *database.DB) {
 					column, values = schema.ToQueryValues(db.Statement.Table, db.Statement.Schema.PrimaryFieldDBNames, queryValues)
 
 					if len(values) > 0 {
-						db.Statement.AddClause(types.Where{Exprs: []types.Expression{types.IN{Column: column, Values: values}}})
+						db.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.IN{Column: column, Values: values}}})
 					}
 				}
 			}
 
-			db.Statement.AddClauseIfNotExists(types.From{})
+			db.Statement.AddClauseIfNotExists(clause.From{})
 
 			db.Statement.Build(db.Statement.BuildClauses...)
 		}

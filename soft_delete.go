@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"reflect"
 
+	"github.com/driver005/database/clause"
 	"github.com/driver005/database/schema"
-	"github.com/driver005/database/types"
 )
 
 type DeletedAt sql.NullTime
@@ -44,8 +44,8 @@ func (n *DeletedAt) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-func (DeletedAt) QueryClauses(f *schema.Field) []types.Interface {
-	return []types.Interface{SoftDeleteQueryClause{Field: f}}
+func (DeletedAt) QueryClauses(f *schema.Field) []clause.Interface {
+	return []clause.Interface{SoftDeleteQueryClause{Field: f}}
 }
 
 type SoftDeleteQueryClause struct {
@@ -56,36 +56,36 @@ func (sd SoftDeleteQueryClause) Name() string {
 	return ""
 }
 
-func (sd SoftDeleteQueryClause) Build(types.Builder) {
+func (sd SoftDeleteQueryClause) Build(clause.Builder) {
 }
 
-func (sd SoftDeleteQueryClause) MergeClause(*types.Type) {
+func (sd SoftDeleteQueryClause) MergeClause(*clause.Clause) {
 }
 
 func (sd SoftDeleteQueryClause) ModifyStatement(stmt *Statement) {
-	if _, ok := stmt.Types["soft_delete_enabled"]; !ok && !stmt.Statement.Unscoped {
-		if c, ok := stmt.Types["WHERE"]; ok {
-			if where, ok := c.Expression.(types.Where); ok && len(where.Exprs) >= 1 {
+	if _, ok := stmt.Clauses["soft_delete_enabled"]; !ok && !stmt.Statement.Unscoped {
+		if c, ok := stmt.Clauses["WHERE"]; ok {
+			if where, ok := c.Expression.(clause.Where); ok && len(where.Exprs) >= 1 {
 				for _, expr := range where.Exprs {
-					if orCond, ok := expr.(types.OrConditions); ok && len(orCond.Exprs) == 1 {
-						where.Exprs = []types.Expression{types.And(where.Exprs...)}
+					if orCond, ok := expr.(clause.OrConditions); ok && len(orCond.Exprs) == 1 {
+						where.Exprs = []clause.Expression{clause.And(where.Exprs...)}
 						c.Expression = where
-						stmt.Types["WHERE"] = c
+						stmt.Clauses["WHERE"] = c
 						break
 					}
 				}
 			}
 		}
 
-		stmt.AddClause(types.Where{Exprs: []types.Expression{
-			types.Eq{Column: types.Column{Table: types.CurrentTable, Name: sd.Field.DBName}, Value: nil},
+		stmt.AddClause(clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Table: clause.CurrentTable, Name: sd.Field.DBName}, Value: nil},
 		}})
-		stmt.Types["soft_delete_enabled"] = types.Type{}
+		stmt.Clauses["soft_delete_enabled"] = clause.Clause{}
 	}
 }
 
-func (DeletedAt) UpdateClauses(f *schema.Field) []types.Interface {
-	return []types.Interface{SoftDeleteUpdateClause{Field: f}}
+func (DeletedAt) UpdateClauses(f *schema.Field) []clause.Interface {
+	return []clause.Interface{SoftDeleteUpdateClause{Field: f}}
 }
 
 type SoftDeleteUpdateClause struct {
@@ -96,10 +96,10 @@ func (sd SoftDeleteUpdateClause) Name() string {
 	return ""
 }
 
-func (sd SoftDeleteUpdateClause) Build(types.Builder) {
+func (sd SoftDeleteUpdateClause) Build(clause.Builder) {
 }
 
-func (sd SoftDeleteUpdateClause) MergeClause(*types.Type) {
+func (sd SoftDeleteUpdateClause) MergeClause(*clause.Clause) {
 }
 
 func (sd SoftDeleteUpdateClause) ModifyStatement(stmt *Statement) {
@@ -108,8 +108,8 @@ func (sd SoftDeleteUpdateClause) ModifyStatement(stmt *Statement) {
 	}
 }
 
-func (DeletedAt) DeleteClauses(f *schema.Field) []types.Interface {
-	return []types.Interface{SoftDeleteDeleteClause{Field: f}}
+func (DeletedAt) DeleteClauses(f *schema.Field) []clause.Interface {
+	return []clause.Interface{SoftDeleteDeleteClause{Field: f}}
 }
 
 type SoftDeleteDeleteClause struct {
@@ -120,16 +120,16 @@ func (sd SoftDeleteDeleteClause) Name() string {
 	return ""
 }
 
-func (sd SoftDeleteDeleteClause) Build(types.Builder) {
+func (sd SoftDeleteDeleteClause) Build(clause.Builder) {
 }
 
-func (sd SoftDeleteDeleteClause) MergeClause(*types.Type) {
+func (sd SoftDeleteDeleteClause) MergeClause(*clause.Clause) {
 }
 
 func (sd SoftDeleteDeleteClause) ModifyStatement(stmt *Statement) {
 	if stmt.SQL.Len() == 0 && !stmt.Statement.Unscoped {
 		curTime := stmt.DB.NowFunc()
-		stmt.AddClause(types.Set{{Column: types.Column{Name: sd.Field.DBName}, Value: curTime}})
+		stmt.AddClause(clause.Set{{Column: clause.Column{Name: sd.Field.DBName}, Value: curTime}})
 		stmt.SetColumn(sd.Field.DBName, curTime, true)
 
 		if stmt.Schema != nil {
@@ -137,7 +137,7 @@ func (sd SoftDeleteDeleteClause) ModifyStatement(stmt *Statement) {
 			column, values := schema.ToQueryValues(stmt.Table, stmt.Schema.PrimaryFieldDBNames, queryValues)
 
 			if len(values) > 0 {
-				stmt.AddClause(types.Where{Exprs: []types.Expression{types.IN{Column: column, Values: values}}})
+				stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.IN{Column: column, Values: values}}})
 			}
 
 			if stmt.ReflectValue.CanAddr() && stmt.Dest != stmt.Model && stmt.Model != nil {
@@ -145,13 +145,13 @@ func (sd SoftDeleteDeleteClause) ModifyStatement(stmt *Statement) {
 				column, values = schema.ToQueryValues(stmt.Table, stmt.Schema.PrimaryFieldDBNames, queryValues)
 
 				if len(values) > 0 {
-					stmt.AddClause(types.Where{Exprs: []types.Expression{types.IN{Column: column, Values: values}}})
+					stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.IN{Column: column, Values: values}}})
 				}
 			}
 		}
 
 		SoftDeleteQueryClause(sd).ModifyStatement(stmt)
-		stmt.AddClauseIfNotExists(types.Update{})
+		stmt.AddClauseIfNotExists(clause.Update{})
 		stmt.Build(stmt.DB.Callback().Update().Clauses...)
 	}
 }
