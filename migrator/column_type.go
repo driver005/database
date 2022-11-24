@@ -33,7 +33,7 @@ func (ct ColumnType) Name() string {
 
 // DatabaseTypeName returns the database system name of the column type. If an empty
 // string is returned, then the driver type name is not supported.
-// Consult your driver documentation for a list of driver data clause. Length specifiers
+// Consult your driver documentation for a list of driver data types. Length specifiers
 // are not included.
 // Common type names include "VARCHAR", "TEXT", "NVARCHAR", "DECIMAL", "BOOL",
 // "INT", and "BIGINT".
@@ -59,7 +59,7 @@ func (ct ColumnType) AutoIncrement() (isAutoIncrement bool, ok bool) {
 	return ct.AutoIncrementValue.Bool, ct.AutoIncrementValue.Valid
 }
 
-// Length returns the column type length for variable length column clause
+// Length returns the column type length for variable length column types
 func (ct ColumnType) Length() (length int64, ok bool) {
 	if ct.LengthValue.Valid {
 		return ct.LengthValue.Int64, true

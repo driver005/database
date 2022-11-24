@@ -11,6 +11,26 @@ import (
 	"github.com/driver005/database/schema"
 )
 
+const indexSql = `
+SELECT
+	TABLE_NAME,
+	COLUMN_NAME,
+	INDEX_NAME,
+	NON_UNIQUE 
+FROM
+	information_schema.STATISTICS 
+WHERE
+	TABLE_SCHEMA = ? 
+	AND TABLE_NAME = ? 
+ORDER BY
+	INDEX_NAME,
+	SEQ_IN_INDEX`
+
+var typeAliasMap = map[string][]string{
+	"bool":    {"tinyint"},
+	"tinyint": {"bool"},
+}
+
 type Migrator struct {
 	migrator.Migrator
 	Dialector
@@ -138,32 +158,32 @@ func (m Migrator) DropConstraint(value interface{}, name string) error {
 	})
 }
 
-// Columnclause column clause return columnclause,error
-func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error) {
-	columnclause := make([]database.ColumnType, 0)
+// ColumnTypes column types return columnTypes,error
+func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) {
+	columnTypes := make([]database.ColumnType, 0)
 	err := m.RunWithValue(value, func(stmt *database.Statement) error {
 		var (
-			currentDatabase = m.DB.Migrator().CurrentDatabase()
-			columnclauseQL  = "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale "
-			rows, err       = m.DB.Session(&database.Session{}).Table(stmt.Table).Limit(1).Rows()
+			currentDatabase, table = m.CurrentSchema(stmt, stmt.Table)
+			columnTypeSQL          = "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale "
+			rows, err              = m.DB.Session(&database.Session{}).Table(table).Limit(1).Rows()
 		)
 
 		if err != nil {
 			return err
 		}
 
-		rawColumnclause, err := rows.Columnclause()
+		rawColumnTypes, err := rows.ColumnTypes()
 
 		if err := rows.Close(); err != nil {
 			return err
 		}
 
 		if !m.DisableDatetimePrecision {
-			columnclauseQL += ", datetime_precision "
+			columnTypeSQL += ", datetime_precision "
 		}
-		columnclauseQL += "FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ORDINAL_POSITION"
+		columnTypeSQL += "FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ORDINAL_POSITION"
 
-		columns, rowErr := m.DB.Raw(columnclauseQL, currentDatabase, stmt.Table).Rows()
+		columns, rowErr := m.DB.Table(table).Raw(columnTypeSQL, currentDatabase, table).Rows()
 		if rowErr != nil {
 			return rowErr
 		}
@@ -203,31 +223,38 @@ func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error)
 			}
 
 			column.DefaultValueValue.String = strings.Trim(column.DefaultValueValue.String, "'")
+			if m.Dialector.DontSupportNullAsDefaultValue {
+				// rewrite mariadb default value like other version
+				if column.DefaultValueValue.Valid && column.DefaultValueValue.String == "NULL" {
+					column.DefaultValueValue.Valid = false
+					column.DefaultValueValue.String = ""
+				}
+			}
 
 			if datetimePrecision.Valid {
 				column.DecimalSizeValue = datetimePrecision
 			}
 
-			for _, c := range rawColumnclause {
+			for _, c := range rawColumnTypes {
 				if c.Name() == column.NameValue.String {
 					column.SQLColumnType = c
 					break
 				}
 			}
 
-			columnclause = append(columnclause, column)
+			columnTypes = append(columnTypes, column)
 		}
 
 		return nil
 	})
 
-	return columnclause, err
+	return columnTypes, err
 }
 
 func (m Migrator) CurrentDatabase() (name string) {
 	baseName := m.Migrator.CurrentDatabase()
 	m.DB.Raw(
-		"SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE ? ORDER BY SCHEMA_NAME=? DESC limit 1",
+		"SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE ? ORDER BY SCHEMA_NAME=? DESC,SCHEMA_NAME limit 1",
 		baseName+"%", baseName).Scan(&name)
 	return
 }
@@ -236,4 +263,67 @@ func (m Migrator) GetTables() (tableList []string, err error) {
 	err = m.DB.Raw("SELECT TABLE_NAME FROM information_schema.tables where TABLE_SCHEMA=?", m.CurrentDatabase()).
 		Scan(&tableList).Error
 	return
+}
+
+func (m Migrator) GetIndexes(value interface{}) ([]database.Index, error) {
+	indexes := make([]database.Index, 0)
+	err := m.RunWithValue(value, func(stmt *database.Statement) error {
+
+		result := make([]*Index, 0)
+		schema, table := m.CurrentSchema(stmt, stmt.Table)
+		scanErr := m.DB.Table(table).Raw(indexSql, schema, table).Scan(&result).Error
+		if scanErr != nil {
+			return scanErr
+		}
+		indexMap := groupByIndexName(result)
+
+		for _, idx := range indexMap {
+			tempIdx := &migrator.Index{
+				TableName: idx[0].TableName,
+				NameValue: idx[0].IndexName,
+				PrimaryKeyValue: sql.NullBool{
+					Bool:  idx[0].IndexName == "PRIMARY",
+					Valid: true,
+				},
+				UniqueValue: sql.NullBool{
+					Bool:  idx[0].NonUnique == 0,
+					Valid: true,
+				},
+			}
+			for _, x := range idx {
+				tempIdx.ColumnList = append(tempIdx.ColumnList, x.ColumnName)
+			}
+			indexes = append(indexes, tempIdx)
+		}
+		return nil
+	})
+	return indexes, err
+}
+
+// Index table index info
+type Index struct {
+	TableName  string `database:"column:TABLE_NAME"`
+	ColumnName string `database:"column:COLUMN_NAME"`
+	IndexName  string `database:"column:INDEX_NAME"`
+	NonUnique  int32  `database:"column:NON_UNIQUE"`
+}
+
+func groupByIndexName(indexList []*Index) map[string][]*Index {
+	columnIndexMap := make(map[string][]*Index, len(indexList))
+	for _, idx := range indexList {
+		columnIndexMap[idx.IndexName] = append(columnIndexMap[idx.IndexName], idx)
+	}
+	return columnIndexMap
+}
+
+func (m Migrator) CurrentSchema(stmt *database.Statement, table string) (string, string) {
+	if tables := strings.Split(table, `.`); len(tables) == 2 {
+		return tables[0], tables[1]
+	}
+	m.DB = m.DB.Table(table)
+	return m.CurrentDatabase(), table
+}
+
+func (m Migrator) GetTypeAliases(databaseTypeName string) []string {
+	return typeAliasMap[databaseTypeName]
 }

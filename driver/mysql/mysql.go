@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,21 +16,25 @@ import (
 	"github.com/driver005/database/logger"
 	"github.com/driver005/database/migrator"
 	"github.com/driver005/database/schema"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/driver005/database/utils"
+	"github.com/go-sql-driver/mysql"
 )
 
 type Config struct {
-	DriverName                string
-	ServerVersion             string
-	DSN                       string
-	Conn                      database.ConnPool
-	SkipInitializeWithVersion bool
-	DefaultStringSize         uint
-	DefaultDatetimePrecision  *int
-	DisableDatetimePrecision  bool
-	DontSupportRenameIndex    bool
-	DontSupportRenameColumn   bool
-	DontSupportForShareClause bool
+	DriverName                    string
+	ServerVersion                 string
+	DSN                           string
+	DSNConfig                     *mysql.Config
+	Conn                          database.ConnPool
+	SkipInitializeWithVersion     bool
+	DefaultStringSize             uint
+	DefaultDatetimePrecision      *int
+	DisableWithReturning          bool
+	DisableDatetimePrecision      bool
+	DontSupportRenameIndex        bool
+	DontSupportRenameColumn       bool
+	DontSupportForShareClause     bool
+	DontSupportNullAsDefaultValue bool
 }
 
 type Dialector struct {
@@ -49,7 +55,8 @@ var (
 )
 
 func Open(dsn string) database.Dialector {
-	return &Dialector{Config: &Config{DSN: dsn}}
+	dsnConf, _ := mysql.ParseDSN(dsn)
+	return &Dialector{Config: &Config{DSN: dsn, DSNConfig: dsnConf}}
 }
 
 func New(config Config) database.Dialector {
@@ -69,30 +76,20 @@ func (dialector Dialector) NowFunc(n int) func() time.Time {
 }
 
 func (dialector Dialector) Apply(config *database.Config) error {
-	if config.NowFunc == nil {
-		if dialector.DefaultDatetimePrecision == nil {
-			dialector.DefaultDatetimePrecision = &defaultDatetimePrecision
-		}
-
-		// while maintaining the readability of the code, separate the business logic from
-		// the general part and leave it to the function to do it here.
-		config.NowFunc = dialector.NowFunc(*dialector.DefaultDatetimePrecision)
+	if config.NowFunc != nil {
+		return nil
 	}
 
+	if dialector.DefaultDatetimePrecision == nil {
+		dialector.DefaultDatetimePrecision = &defaultDatetimePrecision
+	}
+	// while maintaining the readability of the code, separate the business logic from
+	// the general part and leave it to the function to do it here.
+	config.NowFunc = dialector.NowFunc(*dialector.DefaultDatetimePrecision)
 	return nil
 }
 
 func (dialector Dialector) Initialize(db *database.DB) (err error) {
-	ctx := context.Background()
-
-	// register callbacks
-	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
-		CreateClauses: CreateClauses,
-		QueryClauses:  QueryClauses,
-		UpdateClauses: UpdateClauses,
-		DeleteClauses: DeleteClauses,
-	})
-
 	if dialector.DriverName == "" {
 		dialector.DriverName = "mysql"
 	}
@@ -110,8 +107,9 @@ func (dialector Dialector) Initialize(db *database.DB) (err error) {
 		}
 	}
 
+	withReturning := false
 	if !dialector.Config.SkipInitializeWithVersion {
-		err = db.ConnPool.QueryRowContext(ctx, "SELECT VERSION()").Scan(&dialector.ServerVersion)
+		err = db.ConnPool.QueryRowContext(context.Background(), "SELECT VERSION()").Scan(&dialector.ServerVersion)
 		if err != nil {
 			return err
 		}
@@ -120,6 +118,8 @@ func (dialector Dialector) Initialize(db *database.DB) (err error) {
 			dialector.Config.DontSupportRenameIndex = true
 			dialector.Config.DontSupportRenameColumn = true
 			dialector.Config.DontSupportForShareClause = true
+			dialector.Config.DontSupportNullAsDefaultValue = true
+			withReturning = checkVersion(dialector.ServerVersion, "10.5")
 		} else if strings.HasPrefix(dialector.ServerVersion, "5.6.") {
 			dialector.Config.DontSupportRenameIndex = true
 			dialector.Config.DontSupportRenameColumn = true
@@ -135,24 +135,50 @@ func (dialector Dialector) Initialize(db *database.DB) (err error) {
 		}
 	}
 
+	// register callbacks
+	callbackConfig := &callbacks.Config{
+		CreateClauses: CreateClauses,
+		QueryClauses:  QueryClauses,
+		UpdateClauses: UpdateClauses,
+		DeleteClauses: DeleteClauses,
+	}
+
+	if !dialector.Config.DisableWithReturning && withReturning {
+		callbackConfig.LastInsertIDReversed = true
+
+		if !utils.Contains(callbackConfig.CreateClauses, "RETURNING") {
+			callbackConfig.CreateClauses = append(callbackConfig.CreateClauses, "RETURNING")
+		}
+
+		if !utils.Contains(callbackConfig.UpdateClauses, "RETURNING") {
+			callbackConfig.UpdateClauses = append(callbackConfig.UpdateClauses, "RETURNING")
+		}
+
+		if !utils.Contains(callbackConfig.DeleteClauses, "RETURNING") {
+			callbackConfig.DeleteClauses = append(callbackConfig.DeleteClauses, "RETURNING")
+		}
+	}
+
+	callbacks.RegisterDefaultCallbacks(db, callbackConfig)
+
 	for k, v := range dialector.ClauseBuilders() {
-		db.clauseBuilders[k] = v
+		db.ClauseBuilders[k] = v
 	}
 	return
 }
 
 const (
-	// ClauseOnConflict for clause.clauseBuilder ON CONFLICT key
+	// ClauseOnConflict for clause.ClauseBuilder ON CONFLICT key
 	ClauseOnConflict = "ON CONFLICT"
-	// ClauseValues for clause.clauseBuilder VALUES key
+	// ClauseValues for clause.ClauseBuilder VALUES key
 	ClauseValues = "VALUES"
-	// ClauseValues for clause.clauseBuilder FOR key
+	// ClauseFor for clause.ClauseBuilder FOR key
 	ClauseFor = "FOR"
 )
 
-func (dialector Dialector) ClauseBuilders() map[string]clause.clauseBuilder {
-	clauseBuilders := map[string]clause.clauseBuilder{
-		ClauseOnConflict: func(c clause.Type, builder clause.Builder) {
+func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
+	clauseBuilders := map[string]clause.ClauseBuilder{
+		ClauseOnConflict: func(c clause.Clause, builder clause.Builder) {
 			onConflict, ok := c.Expression.(clause.OnConflict)
 			if !ok {
 				c.Build(builder)
@@ -174,6 +200,8 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.clauseBuilder {
 					if column.Name != "" {
 						onConflict.DoUpdates = []clause.Assignment{{Column: column, Value: column}}
 					}
+
+					builder.(*database.Statement).AddClause(onConflict)
 				}
 			}
 
@@ -194,7 +222,7 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.clauseBuilder {
 				}
 			}
 		},
-		ClauseValues: func(c clause.Type, builder clause.Builder) {
+		ClauseValues: func(c clause.Clause, builder clause.Builder) {
 			if values, ok := c.Expression.(clause.Values); ok && len(values.Columns) == 0 {
 				builder.WriteString("VALUES()")
 				return
@@ -204,7 +232,7 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.clauseBuilder {
 	}
 
 	if dialector.Config.DontSupportForShareClause {
-		clauseBuilders[ClauseFor] = func(c clause.Type, builder clause.Builder) {
+		clauseBuilders[ClauseFor] = func(c clause.Clause, builder clause.Builder) {
 			if values, ok := c.Expression.(clause.Locking); ok && strings.EqualFold(values.Strength, "SHARE") {
 				builder.WriteString("LOCK IN SHARE MODE")
 				return
@@ -284,7 +312,23 @@ func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	writer.WriteByte('`')
 }
 
+type localTimeInterface interface {
+	In(loc *time.Location) time.Time
+}
+
 func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
+	if dialector.DSNConfig != nil && dialector.DSNConfig.Loc == time.Local {
+		for i, v := range vars {
+			if p, ok := v.(localTimeInterface); ok {
+				func(i int, t localTimeInterface) {
+					defer func() {
+						recover()
+					}()
+					vars[i] = t.In(time.Local)
+				}(i, p)
+			}
+		}
+	}
 	return logger.ExplainSQL(sql, nil, `'`, vars...)
 }
 
@@ -302,9 +346,9 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 		return dialector.getSchemaTimeType(field)
 	case schema.Bytes:
 		return dialector.getSchemaBytesType(field)
+	default:
+		return dialector.getSchemaCustomType(field)
 	}
-
-	return string(field.DataType)
 }
 
 func (dialector Dialector) getSchemaFloatType(field *schema.Field) string {
@@ -345,11 +389,11 @@ func (dialector Dialector) getSchemaStringType(field *schema.Field) string {
 }
 
 func (dialector Dialector) getSchemaTimeType(field *schema.Field) string {
-	precision := ""
 	if !dialector.DisableDatetimePrecision && field.Precision == 0 {
 		field.Precision = *dialector.DefaultDatetimePrecision
 	}
 
+	var precision string
 	if field.Precision > 0 {
 		precision = fmt.Sprintf("(%d)", field.Precision)
 	}
@@ -373,23 +417,37 @@ func (dialector Dialector) getSchemaBytesType(field *schema.Field) string {
 }
 
 func (dialector Dialector) getSchemaIntAndUnitType(field *schema.Field) string {
-	sqlType := "bigint"
+	constraint := func(sqlType string) string {
+		if field.DataType == schema.Uint {
+			sqlType += " unsigned"
+		}
+		if field.NotNull {
+			sqlType += " NOT NULL"
+		}
+		if field.AutoIncrement {
+			sqlType += " AUTO_INCREMENT"
+		}
+		return sqlType
+	}
+
 	switch {
 	case field.Size <= 8:
-		sqlType = "tinyint"
+		return constraint("tinyint")
 	case field.Size <= 16:
-		sqlType = "smallint"
+		return constraint("smallint")
 	case field.Size <= 24:
-		sqlType = "mediumint"
+		return constraint("mediumint")
 	case field.Size <= 32:
-		sqlType = "int"
+		return constraint("int")
+	default:
+		return constraint("bigint")
 	}
+}
 
-	if field.DataType == schema.Uint {
-		sqlType += " unsigned"
-	}
+func (dialector Dialector) getSchemaCustomType(field *schema.Field) string {
+	sqlType := string(field.DataType)
 
-	if field.AutoIncrement {
+	if field.AutoIncrement && !strings.Contains(strings.ToLower(sqlType), " auto_increment") {
 		sqlType += " AUTO_INCREMENT"
 	}
 
@@ -402,4 +460,32 @@ func (dialector Dialector) SavePoint(tx *database.DB, name string) error {
 
 func (dialector Dialector) RollbackTo(tx *database.DB, name string) error {
 	return tx.Exec("ROLLBACK TO SAVEPOINT " + name).Error
+}
+
+// checkVersion newer or equal returns true, old returns false
+func checkVersion(newVersion, oldVersion string) bool {
+	if newVersion == oldVersion {
+		return true
+	}
+
+	var (
+		versionTrimmerRegexp = regexp.MustCompile(`^(\d+).*$`)
+
+		newVersions = strings.Split(newVersion, ".")
+		oldVersions = strings.Split(oldVersion, ".")
+	)
+	for idx, nv := range newVersions {
+		if len(oldVersions) <= idx {
+			return true
+		}
+
+		nvi, _ := strconv.Atoi(versionTrimmerRegexp.ReplaceAllString(nv, "$1"))
+		ovi, _ := strconv.Atoi(versionTrimmerRegexp.ReplaceAllString(oldVersions[idx], "$1"))
+		if nvi == ovi {
+			continue
+		}
+		return nvi > ovi
+	}
+
+	return false
 }

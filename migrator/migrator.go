@@ -3,6 +3,7 @@ package migrator
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -14,8 +15,7 @@ import (
 )
 
 var (
-	regRealDataType = regexp.MustCompile(`[^\d](\d+)[^\d]?`)
-	regFullDataType = regexp.MustCompile(`[^\d]*(\d+)[^\d]?`)
+	regFullDataType = regexp.MustCompile(`\D*(\d+)\D?`)
 )
 
 // Migrator m struct
@@ -30,7 +30,6 @@ type Config struct {
 	database.Dialector
 }
 
-// DBDataTypeInterface database data type interface
 type DBDataTypeInterface interface {
 	DBDataType(*database.DB, *schema.Field) string
 }
@@ -99,7 +98,7 @@ func (m Migrator) AutoMigrate(values ...interface{}) error {
 			}
 		} else {
 			if err := m.RunWithValue(value, func(stmt *database.Statement) (errr error) {
-				columnclause, err := m.DB.Migrator().Columnclause(value)
+				columnTypes, err := m.DB.Migrator().ColumnTypes(value)
 				if err != nil {
 					return err
 				}
@@ -108,7 +107,7 @@ func (m Migrator) AutoMigrate(values ...interface{}) error {
 					field := stmt.Schema.FieldsByDBName[dbName]
 					var foundColumn database.ColumnType
 
-					for _, columnType := range columnclause {
+					for _, columnType := range columnTypes {
 						if columnType.Name() == dbName {
 							foundColumn = columnType
 							break
@@ -135,12 +134,12 @@ func (m Migrator) AutoMigrate(values ...interface{}) error {
 							}
 						}
 					}
+				}
 
-					for _, chk := range stmt.Schema.ParseCheckConstraints() {
-						if !tx.Migrator().HasConstraint(value, chk.Name) {
-							if err := tx.Migrator().CreateConstraint(value, chk.Name); err != nil {
-								return err
-							}
+				for _, chk := range stmt.Schema.ParseCheckConstraints() {
+					if !tx.Migrator().HasConstraint(value, chk.Name) {
+						if err := tx.Migrator().CreateConstraint(value, chk.Name); err != nil {
+							return err
 						}
 					}
 				}
@@ -403,31 +402,52 @@ func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error
 // MigrateColumn migrate column
 func (m Migrator) MigrateColumn(value interface{}, field *schema.Field, columnType database.ColumnType) error {
 	// found, smart migrate
-	fullDataType := strings.ToLower(m.DB.Migrator().FullDataTypeOf(field).SQL)
+	fullDataType := strings.TrimSpace(strings.ToLower(m.DB.Migrator().FullDataTypeOf(field).SQL))
 	realDataType := strings.ToLower(columnType.DatabaseTypeName())
 
-	alterColumn := false
+	var (
+		alterColumn, isSameType bool
+	)
 
-	// check size
-	if length, ok := columnType.Length(); length != int64(field.Size) {
-		if length > 0 && field.Size > 0 {
-			alterColumn = true
-		} else {
-			// has size in data type and not equal
-			// Since the following code is frequently called in the for loop, reg optimization is needed here
-			matches := regRealDataType.FindAllStringSubmatch(realDataType, -1)
-			matches2 := regFullDataType.FindAllStringSubmatch(fullDataType, -1)
-			if (len(matches) == 1 && matches[0][1] != fmt.Sprint(field.Size) || !field.PrimaryKey) &&
-				(len(matches2) == 1 && matches2[0][1] != fmt.Sprint(length) && ok) {
+	if !field.PrimaryKey {
+		// check type
+		if !strings.HasPrefix(fullDataType, realDataType) {
+			// check type aliases
+			aliases := m.DB.Migrator().GetTypeAliases(realDataType)
+			for _, alias := range aliases {
+				if strings.HasPrefix(fullDataType, alias) {
+					isSameType = true
+					break
+				}
+			}
+
+			if !isSameType {
 				alterColumn = true
 			}
 		}
 	}
 
-	// check precision
-	if precision, _, ok := columnType.DecimalSize(); ok && int64(field.Precision) != precision {
-		if regexp.MustCompile(fmt.Sprintf("[^0-9]%d[^0-9]", field.Precision)).MatchString(m.DataTypeOf(field)) {
-			alterColumn = true
+	if !isSameType {
+		// check size
+		if length, ok := columnType.Length(); length != int64(field.Size) {
+			if length > 0 && field.Size > 0 {
+				alterColumn = true
+			} else {
+				// has size in data type and not equal
+				// Since the following code is frequently called in the for loop, reg optimization is needed here
+				matches2 := regFullDataType.FindAllStringSubmatch(fullDataType, -1)
+				if !field.PrimaryKey &&
+					(len(matches2) == 1 && matches2[0][1] != fmt.Sprint(length) && ok) {
+					alterColumn = true
+				}
+			}
+		}
+
+		// check precision
+		if precision, _, ok := columnType.DecimalSize(); ok && int64(field.Precision) != precision {
+			if regexp.MustCompile(fmt.Sprintf("[^0-9]%d[^0-9]", field.Precision)).MatchString(m.DataTypeOf(field)) {
+				alterColumn = true
+			}
 		}
 	}
 
@@ -448,10 +468,20 @@ func (m Migrator) MigrateColumn(value interface{}, field *schema.Field, columnTy
 	}
 
 	// check default value
-	if v, ok := columnType.DefaultValue(); ok && v != field.DefaultValue {
-		// not primary key
-		if !field.PrimaryKey {
+	if !field.PrimaryKey {
+		dv, dvNotNull := columnType.DefaultValue()
+		if dvNotNull && field.DefaultValueInterface == nil {
+			// defalut value -> null
 			alterColumn = true
+		} else if !dvNotNull && field.DefaultValueInterface != nil {
+			// null -> default value
+			alterColumn = true
+		} else if dv != field.DefaultValue {
+			// default value not equal
+			// not both null
+			if !(field.DefaultValueInterface == nil && !dvNotNull) {
+				alterColumn = true
+			}
 		}
 	}
 
@@ -464,15 +494,15 @@ func (m Migrator) MigrateColumn(value interface{}, field *schema.Field, columnTy
 	}
 
 	if alterColumn && !field.IgnoreMigration {
-		return m.DB.Migrator().AlterColumn(value, field.Name)
+		return m.DB.Migrator().AlterColumn(value, field.DBName)
 	}
 
 	return nil
 }
 
-// Columnclause return columnclause []database.ColumnType and execErr error
-func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error) {
-	columnclause := make([]database.ColumnType, 0)
+// ColumnTypes return columnTypes []database.ColumnType and execErr error
+func (m Migrator) ColumnTypes(value interface{}) ([]database.ColumnType, error) {
+	columnTypes := make([]database.ColumnType, 0)
 	execErr := m.RunWithValue(value, func(stmt *database.Statement) (err error) {
 		rows, err := m.DB.Session(&database.Session{}).Table(stmt.Table).Limit(1).Rows()
 		if err != nil {
@@ -483,20 +513,20 @@ func (m Migrator) Columnclause(value interface{}) ([]database.ColumnType, error)
 			err = rows.Close()
 		}()
 
-		var rawColumnclause []*sql.ColumnType
-		rawColumnclause, err = rows.Columnclause()
+		var rawColumnTypes []*sql.ColumnType
+		rawColumnTypes, err = rows.ColumnTypes()
 		if err != nil {
 			return err
 		}
 
-		for _, c := range rawColumnclause {
-			columnclause = append(columnclause, ColumnType{SQLColumnType: c})
+		for _, c := range rawColumnTypes {
+			columnTypes = append(columnTypes, ColumnType{SQLColumnType: c})
 		}
 
 		return
 	})
 
-	return columnclause, execErr
+	return columnTypes, execErr
 }
 
 // CreateView create view
@@ -843,4 +873,14 @@ func (m Migrator) CurrentTable(stmt *database.Statement) interface{} {
 		return *stmt.TableExpr
 	}
 	return clause.Table{Name: stmt.Table}
+}
+
+// GetIndexes return Indexes []database.Index and execErr error
+func (m Migrator) GetIndexes(dst interface{}) ([]database.Index, error) {
+	return nil, errors.New("not support")
+}
+
+// GetTypeAliases return database type aliases
+func (m Migrator) GetTypeAliases(databaseTypeName string) []string {
+	return nil
 }
